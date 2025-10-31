@@ -16,6 +16,7 @@ class TelnetTab(ttk.Frame, BasicUI):
     def telnet_ui(self):
         """端口扫描界面布局"""
         self.create_assigntelnet_section()
+        self.create_listtelnet_section()
         self.create_batchtelnet_section()
         self.create_outputping_section()
 # --------------------------------------UI界面布局函数--------------------------------------
@@ -28,6 +29,16 @@ class TelnetTab(ttk.Frame, BasicUI):
         self.assignTelnet_IP = self.add_input(frame, "目标IP", row=0, col=0, inivar="202.89.233.100") 
         self.assignTelnet_port = self.add_input(frame, "目标端口", row=0, col=1, inivar="443", entry_width=10) 
         self.assignTelnet_test = self.add_button(frame, "测试", row=0, col=2, command=self.btn_assignTelnet_test)
+
+    def create_listtelnet_section(self):
+        # 区域标签
+        frame = ttk.LabelFrame(self, text="批量端口连接测试")
+        frame.pack(side='top', fill='x', padx=10, pady=5)
+
+        self.listtelnet_IP = self.add_input(frame, "目标IP", row=0, col=0, inivar="202.89.233.100") 
+        self.listtelnet_ports = self.add_input(frame, "端口列表", row=0, col=1, inivar="21,22,23,25,80,110,143,443,1433,3306,3389", entry_width=40) 
+        self.listtelnet_start = self.add_button(frame, "开始", row=0, col=2, command=self.btn_listTelnet_start)
+        self.listtelnet_stop = self.add_button(frame, "停止", row=0, col=3, command=self.btn_listTelnet_stop)
     
     def create_batchtelnet_section(self):
         # 区域标签
@@ -88,16 +99,34 @@ class TelnetTab(ttk.Frame, BasicUI):
             messagebox.showwarning("输入错误", "起始端口最小为1，结束端口最大为65535！")
             return
         logger.info(f"开始测试{self.IP} 的 {port_begin} 到 {port_end} 端口连接情况")
-        self.batchTelnet_start['btn'].config(state='disabled')
         self.telnet_fun.start_range_scan(self.IP, port_begin, port_end)
         
     def btn_batchTelnet_stop(self):
         logger.info(f"停止测试{self.IP} 的端口连接情况")
         self.telnet_fun.stop_scan()
-        self.batchTelnet_start['btn'].config(state='normal')
 
-    def batchTelnet_callback(self):
-        self.batchTelnet_start['btn'].config(state='normal')
+    def btn_listTelnet_start(self):  
+        self.IP = self.listtelnet_IP['var'].get()  
+        self.ports = self.listtelnet_ports['var'].get()   
+        
+        if not self.ports:
+            messagebox.showwarning("输入错误", "请输入端口号或范围！")
+            return
+
+        # 支持格式：例如 "22,80,443,8080"
+        try:
+            ports = [int(p.strip()) for p in self.ports.split(',') if p.strip()]
+        except ValueError:
+            messagebox.showwarning("输入错误", "端口必须为整数，用逗号分隔")
+            return
+
+        logger.info(f"开始测试{self.IP} 的 {ports} 端口连接情况")
+        self.telnet_fun.start_list_scan(self.IP, ports)
+
+    def btn_listTelnet_stop(self):
+        logger.info(f"停止测试{self.IP} 的端口连接情况")
+        self.telnet_fun.stop_scan()
+
 
 
 
