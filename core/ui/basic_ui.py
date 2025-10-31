@@ -88,7 +88,7 @@ class BasicUI:
     def add_button(
                 self, parent, button_text, 
                 row, col=0, command="", 
-                label_width=8, entry_width=20, colspan=1, sticky='w'
+                label_width=8, width=5, colspan=1, sticky='w'
             ):
             """
             添加一个按钮，并返回 (StringVar, Frame) 以便后续控制。
@@ -96,14 +96,14 @@ class BasicUI:
             - button_text: 按钮文本
             - row, col: 放置在父容器的 grid 行列
             - command: 调用的函数
-            - entry_width: 输入框宽度
+            - width: 输入框宽度
             - colspan: 该组控件在父容器上跨越的列数
             - sticky: 对齐方式（默认左对齐）
             """
             group_frame = ttk.Frame(parent)
             group_frame.grid(row=row, column=col, columnspan=colspan, sticky=sticky, padx=5, pady=3)
 
-            btn = ttk.Button(group_frame, text=button_text, command=command)
+            btn = ttk.Button(group_frame, text=button_text, command=command, width=width)
             btn.grid(row=0, column=0, sticky='w')
             return {
                 "frame": group_frame,

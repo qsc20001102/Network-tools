@@ -234,3 +234,38 @@
 2025-10-31 14:33:40,697 [INFO] 停止由 Ping 
 2025-10-31 14:49:43,147 [INFO] 日志系统初始化完成，日志文件路径：E:\Git\Network-tools\app.log
 2025-10-31 14:49:48,110 [INFO] 停止Ping 
+2025-10-31 14:58:38,388 [INFO] 日志系统初始化完成，日志文件路径：E:\Git\Network-tools\app.log
+2025-10-31 14:59:33,663 [INFO] 开始Ping www.feixiangdayezhu.top
+2025-10-31 14:59:36,241 [INFO] 停止Ping www.feixiangdayezhu.top
+2025-10-31 14:59:39,525 [INFO] 开始由 Ping www.feixiangdayezhu.top
+2025-10-31 14:59:42,345 [INFO] 停止由 Ping www.feixiangdayezhu.top
+2025-10-31 15:01:36,902 [INFO] 日志系统初始化完成，日志文件路径：E:\Git\Network-tools\app.log
+2025-10-31 15:02:00,585 [INFO] 日志系统初始化完成，日志文件路径：E:\Git\Network-tools\app.log
+2025-10-31 15:03:20,413 [INFO] 日志系统初始化完成，日志文件路径：E:\Git\Network-tools\app.log
+2025-10-31 15:04:37,391 [INFO] 日志系统初始化完成，日志文件路径：E:\Git\Network-tools\app.log
+2025-10-31 15:05:43,467 [INFO] 日志系统初始化完成，日志文件路径：E:\Git\Network-tools\app.log
+2025-10-31 15:06:28,952 [INFO] 日志系统初始化完成，日志文件路径：E:\Git\Network-tools\app.log
+2025-10-31 15:07:24,602 [INFO] 日志系统初始化完成，日志文件路径：E:\Git\Network-tools\app.log
+2025-10-31 15:08:36,439 [INFO] 日志系统初始化完成，日志文件路径：E:\Git\Network-tools\app.log
+2025-10-31 15:09:05,633 [INFO] 日志系统初始化完成，日志文件路径：E:\Git\Network-tools\app.log
+2025-10-31 15:11:01,416 [INFO] 日志系统初始化完成，日志文件路径：E:\Git\Network-tools\app.log
+2025-10-31 15:11:41,046 [INFO] 日志系统初始化完成，日志文件路径：E:\Git\Network-tools\app.log
+2025-10-31 15:11:54,147 [INFO] 日志系统初始化完成，日志文件路径：E:\Git\Network-tools\app.log
+2025-10-31 15:11:55,877 [INFO] 开始由 Ping 127.0.0.1
+2025-10-31 15:11:59,513 [INFO] 停止由 Ping 127.0.0.1
+2025-10-31 15:12:01,021 [INFO] 开始由 Ping 127.0.0.1
+2025-10-31 15:12:05,691 [INFO] 停止由 Ping 127.0.0.1
+2025-10-31 15:31:50,086 [INFO] 日志系统初始化完成，日志文件路径：E:\Git\Network-tools\app.log
+2025-10-31 15:32:43,390 [INFO] 日志系统初始化完成，日志文件路径：E:\Git\Network-tools\app.log
+2025-10-31 15:33:36,375 [INFO] 日志系统初始化完成，日志文件路径：E:\Git\Network-tools\app.log
+2025-10-31 15:40:33,765 [INFO] 日志系统初始化完成，日志文件路径：E:\Git\Network-tools\app.log
+2025-10-31 15:41:13,921 [INFO] 开始由 Ping www.feixiangdayezhu.top
+2025-10-31 15:41:20,661 [INFO] 停止由 Ping www.feixiangdayezhu.top
+2025-10-31 15:51:03,844 [INFO] 日志系统初始化完成，日志文件路径：E:\Git\Network-tools\app.log
+2025-10-31 15:51:22,946 [INFO] 开始由 Ping www.feixiangdayezhu.top
+2025-10-31 15:51:26,928 [INFO] 停止由 Ping www.feixiangdayezhu.top
+2025-10-31 15:56:35,413 [INFO] 日志系统初始化完成，日志文件路径：E:\Git\Network-tools\app.log
+2025-10-31 15:56:41,068 [INFO] 开始批量 Ping 192.168.1.1 - 192.168.1.255
+2025-10-31 15:57:02,030 [INFO] 开始由192.168.10.1 批量 Ping 192.168.1.1 - 192.168.1.255
+2025-10-31 15:57:05,860 [INFO] 开始由192.168.10.1 批量 Ping 192.168.1.1 - 192.168.1.255
+2025-10-31 15:57:06,885 [INFO] 停止由192.168.10.1 批量 Ping 192.168.1.1 - 192.168.1.255

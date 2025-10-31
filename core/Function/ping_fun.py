@@ -1,7 +1,7 @@
 import tkinter as tk
 from tkinter import scrolledtext, messagebox
 import subprocess
-import platform
+import concurrent.futures
 import threading
 import re
 
@@ -79,3 +79,73 @@ class PingFun:
         self.result_box.insert(tk.END, stats)
         self.result_box.see(tk.END)
 
+    # ================= 批量 Ping =================
+    def start_batch_ping(self, net_prefix, start, end, local_ip=None, callback=None):
+        """
+        批量 Ping 多个 IP 地址。
+        例如：net_prefix='192.168.1.'  start=1  end=254
+        """
+        self.callback = callback
+        self.stop_flag = False
+        self.result_box.delete('1.0', tk.END)
+        self.result_box.insert(tk.END, f"开始并发 Ping：{net_prefix}{start} - {net_prefix}{end}\n\n")
+
+        # ---- 启动线程池执行 ----
+        self.batch_thread = threading.Thread(
+            target=self._concurrent_batch_ping, args=(net_prefix, start, end, local_ip), daemon=True)
+        self.batch_thread.start()
+
+    def _ping_one_ip(self, ip, local_ip=None):
+        """Ping 单个 IP 地址并返回结果"""
+        if self.stop_flag:
+            return None
+
+        command = ['ping', ip, '-n', '1', '-w', '1000']
+        if local_ip:
+            command += ['-S', local_ip]
+        try:
+            result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                    text=True, timeout=2)
+            if "TTL=" in result.stdout.upper():
+                return f"{ip} ✅ 通\n"
+            else:
+                return f"{ip} ❌ 不通\n"
+        except subprocess.TimeoutExpired:
+            return f"{ip} ⚠️ 超时\n"
+        except Exception as e:
+            return f"{ip} 错误: {e}\n"
+
+    def _concurrent_batch_ping(self, net_prefix, start, end, local_ip=None):
+        """并发执行批量 Ping"""
+        ip_list = [f"{net_prefix}{i}" for i in range(start, end + 1)]
+
+        # 限制最大并发数，防止系统资源耗尽
+        max_workers = min(50, len(ip_list))
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_ip = {executor.submit(self._ping_one_ip, ip, local_ip): ip for ip in ip_list}
+
+            for future in concurrent.futures.as_completed(future_to_ip):
+                if self.stop_flag:
+                    break
+                result = future.result()
+                if result:
+                    self.result_box.insert(tk.END, result)
+                    self.result_box.see(tk.END)
+
+        if not self.stop_flag:
+            self.result_box.insert(tk.END, "\n并发批量 Ping 完成。\n")
+        else:
+            self.result_box.insert(tk.END, "\n批量 Ping 已停止。\n")
+        self.result_box.see(tk.END)
+        if self.callback:
+            self.callback()
+
+    def stop_batch_ping(self):
+        """停止并发批量 ping"""
+        if not self.batch_thread or not self.batch_thread.is_alive():
+            messagebox.showinfo("提示", "当前没有正在运行的批量 Ping。")
+            return
+        self.stop_flag = True
+        self.result_box.insert(tk.END, "\n正在尝试停止批量 Ping...\n")
+        self.result_box.see(tk.END)
