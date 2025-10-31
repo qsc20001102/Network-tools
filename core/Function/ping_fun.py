@@ -100,7 +100,7 @@ class PingFun:
         if self.stop_flag:
             return None
 
-        command = ['ping', ip, '-n', '1', '-w', '1000']
+        command = ['ping', ip, '-n', '1', '-w', '2000']
         if local_ip:
             command += ['-S', local_ip]
         try:

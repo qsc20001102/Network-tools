@@ -3,6 +3,7 @@ from tkinter import ttk, filedialog, messagebox
 
 from core.ui.basic_ui import BasicUI
 from core.ui.tab_ping import PingTab
+from core.ui.tab_telnet import TelnetTab
 
 import logging
 logger = logging.getLogger(__name__)
@@ -19,6 +20,7 @@ class MainUI(BasicUI):
         # 实例化各个功能页
         self.tabs = {
             "Ping测试": PingTab(self.tab_control),
+            "端口扫描服务端": TelnetTab(self.tab_control),
         }
         # 添加到 Notebook
         for name, tab in self.tabs.items():
