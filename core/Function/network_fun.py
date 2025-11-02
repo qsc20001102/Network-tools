@@ -106,6 +106,8 @@ class NetworkManager:
     
     def set_network_info(self, settings):
         """设置指定网卡的网络配置"""
+        # 自动获取系统编码（例如 'cp936' 中文Windows）
+        system_encoding = locale.getpreferredencoding(False)
         try:
             self.result_box.insert(tk.END, f"尝试将网卡配置修改为：\n")
             for key, value in settings.items():

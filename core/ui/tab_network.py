@@ -19,7 +19,6 @@ class NetworkTab(ttk.Frame, BasicUI):
         self.networkconfig = []
         self.build_ui()
         self.netmgr = NetworkManager(self.result_box)
-        self.refresh_allnetwork()
 
     def build_ui(self):
         self.create_iface_section()
@@ -35,7 +34,8 @@ class NetworkTab(ttk.Frame, BasicUI):
             for config in self.networkconfigs:
                 self.networkname_list.append(config.get("name", "未知网卡"))
             self.iface_cb['combobox']['values'] = self.networkname_list
-            self.iface_cb['var'].set(self.networkname_list[0])
+            if self.iface_cb['var'].get() == "" :
+                self.iface_cb['var'].set(self.networkname_list[0])
             self.result_box.insert(tk.END, f"获取网卡信息完成，共:{len(self.networkname_list)}个启用网卡\n")
             self.refresh_network_callback()
 
@@ -51,12 +51,12 @@ class NetworkTab(ttk.Frame, BasicUI):
         frame = ttk.LabelFrame(self, text="网卡选择", padding=8)
         frame.pack(side='top', fill='x', padx=10, pady=6)
 
-        self.iface_cb = self.add_combobox(frame, "选择网卡", row=0, col=0, listbox=[], width=40, inivar=-1)
+        self.iface_cb = self.add_combobox(frame, "选择网卡", row=0, col=0, listbox=[], width=42, inivar=-1)
         self.iface_cb['combobox'].bind("<<ComboboxSelected>>", lambda e: self.refresh_network_callback())
         self.refresh_btn = self.add_button(frame, "刷新网卡列表", row=0, col=1, width=15, command=self.refresh_allnetwork)
-        self.description_entry = self.add_input(frame, "网卡名称", row=1, col=0, inivar="", entry_width=40)
+        self.description_entry = self.add_input(frame, "网卡名称", row=1, col=0, inivar="", entry_width=45)
         self.description_entry['entry'].config(state='disabled')
-        self.mac_entry = self.add_input(frame, "MAC地址", row=1, col=1, inivar="", entry_width=40)
+        self.mac_entry = self.add_input(frame, "MAC地址", row=1, col=1, inivar="", entry_width=35)
         self.mac_entry['entry'].config(state='disabled')
 
     def create_config_section(self):
@@ -76,7 +76,7 @@ class NetworkTab(ttk.Frame, BasicUI):
         frame.pack(side='top', fill='x', padx=10, pady=6)
 
         self.apply_btn = self.add_button(frame, "应用修改", row=0, col=0, width=10, command=self.apply_btn_callback)
-        self.refresh_info_btn = self.add_button(frame, "刷新当前信息", row=0, col=2, width=15, command=self.refresh_network_callback)
+        self.refresh_info_btn = self.add_button(frame, "刷新当前信息", row=0, col=2, width=15, command=self.refresh_allnetwork)
 
     def create_output_section(self):
         frame = ttk.LabelFrame(self, text="输出信息", padding=6)
@@ -90,7 +90,7 @@ class NetworkTab(ttk.Frame, BasicUI):
     def refresh_network_callback(self):
         '''刷新当前网卡信息'''
         # 刷新所有所有网卡信息
-        self.refresh_allnetwork()
+        #self.refresh_allnetwork()
         # 获取选中的网卡信息
         iface_name = self.iface_cb['var'].get()
         config = self.get_network_config(iface_name)
