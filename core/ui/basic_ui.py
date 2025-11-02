@@ -88,7 +88,7 @@ class BasicUI:
     def add_button(
                 self, parent, button_text, 
                 row, col=0, command="", 
-                label_width=8, width=5, colspan=1, sticky='w'
+                width=5, colspan=1, sticky='w'
             ):
             """
             添加一个按钮，并返回 (StringVar, Frame) 以便后续控制。
@@ -96,7 +96,7 @@ class BasicUI:
             - button_text: 按钮文本
             - row, col: 放置在父容器的 grid 行列
             - command: 调用的函数
-            - width: 输入框宽度
+            - width: 按钮宽度
             - colspan: 该组控件在父容器上跨越的列数
             - sticky: 对齐方式（默认左对齐）
             """

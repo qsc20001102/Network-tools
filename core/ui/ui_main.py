@@ -20,7 +20,7 @@ class MainUI(BasicUI):
         self.tab_control.pack(expand=1, fill="both")
         # 实例化各个功能页
         self.tabs = {
-            "网卡配置": NetworkTab(self.tab_control),
+            "网卡设置": NetworkTab(self.tab_control),
             "Ping测试": PingTab(self.tab_control),
             "端口扫描服务端": TelnetTab(self.tab_control),
         }

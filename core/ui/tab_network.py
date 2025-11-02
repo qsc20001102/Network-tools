@@ -1,8 +1,9 @@
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext
 import threading
-import logging
+import re
 
+import logging
 from core.ui.basic_ui import BasicUI
 from core.Function.network_fun import NetworkManager  
 
@@ -13,218 +14,146 @@ class NetworkTab(ttk.Frame, BasicUI):
 
     def __init__(self, parent):
         super().__init__(parent)
-        self.netmgr = NetworkManager()
-        self._build_ui()
-        threading.Thread(target=self.refresh_interfaces, daemon=True).start()
+        
+        self.networkname_list = []
+        self.networkconfig = []
+        self.build_ui()
+        self.netmgr = NetworkManager(self.result_box)
+        self.refresh_allnetwork()
 
-    # ---------------- UI 构建 ----------------
-    def _build_ui(self):
+    def build_ui(self):
         self.create_iface_section()
         self.create_config_section()
         self.create_action_section()
         self.create_output_section()
-        self._set_button_state(enabled=True)
 
+    def refresh_allnetwork(self):
+        '''刷新网卡列表'''
+        self.networkname_list = []
+        try:
+            self.networkconfigs = self.netmgr.get_network_info()
+            for config in self.networkconfigs:
+                self.networkname_list.append(config.get("name", "未知网卡"))
+            self.iface_cb['combobox']['values'] = self.networkname_list
+            self.iface_cb['var'].set(self.networkname_list[0])
+            self.result_box.insert(tk.END, f"获取网卡信息完成，共:{len(self.networkname_list)}个启用网卡\n")
+            self.refresh_network_callback()
+
+            logger.info(f"获取网卡信息完成，共:{len(self.networkname_list)}个启用网卡")
+            logger.info(f"所有获取网卡信息：{self.networkconfigs}")
+        except Exception as e:
+            messagebox.showerror("错误", f"获取网卡信息失败: {e}")
+            logger.error(f"获取网卡信息失败: {e}")
+            self.networkconfigs = []
+
+    # ---------------- UI 构建 ----------------
     def create_iface_section(self):
         frame = ttk.LabelFrame(self, text="网卡选择", padding=8)
         frame.pack(side='top', fill='x', padx=10, pady=6)
 
-        self.iface_var = tk.StringVar()
-        ttk.Label(frame, text="选择网卡：").grid(row=0, column=0, sticky='w')
-        self.iface_cb = ttk.Combobox(frame, textvariable=self.iface_var, state='readonly', width=40)
-        self.iface_cb.grid(row=0, column=1, padx=6, pady=2)
-        self.iface_cb.bind("<<ComboboxSelected>>", self.on_iface_selected)
-
-        self.refresh_btn = ttk.Button(frame, text="刷新", width=10, command=self.on_refresh_clicked)
-        self.refresh_btn.grid(row=0, column=2, padx=6)
+        self.iface_cb = self.add_combobox(frame, "选择网卡", row=0, col=0, listbox=[], width=40, inivar=-1)
+        self.iface_cb['combobox'].bind("<<ComboboxSelected>>", lambda e: self.refresh_network_callback())
+        self.refresh_btn = self.add_button(frame, "刷新网卡列表", row=0, col=1, width=15, command=self.refresh_allnetwork)
+        self.description_entry = self.add_input(frame, "网卡名称", row=1, col=0, inivar="", entry_width=40)
+        self.description_entry['entry'].config(state='disabled')
+        self.mac_entry = self.add_input(frame, "MAC地址", row=1, col=1, inivar="", entry_width=40)
+        self.mac_entry['entry'].config(state='disabled')
 
     def create_config_section(self):
         frame = ttk.LabelFrame(self, text="IP 配置（编辑后点击应用）", padding=8)
         frame.pack(side='top', fill='x', padx=10, pady=6)
 
-        self.ip_entry = self.add_input(frame, "IPv4 地址", row=0, col=0, inivar="", entry_width=25)
+        self.ip_entry = self.add_input(frame, "IPv4 地址", row=0, col=0, inivar="", entry_width=20)
         self.mask_entry = self.add_input(frame, "子网掩码", row=0, col=1, inivar="", entry_width=20)
-        self.gw_entry = self.add_input(frame, "默认网关", row=1, col=0, inivar="", entry_width=25)
-        self.dns1_entry = self.add_input(frame, "主 DNS", row=1, col=1, inivar="", entry_width=25)
-        self.dns2_entry = self.add_input(frame, "备选 DNS", row=1, col=2, inivar="", entry_width=25)
-
-        self.dhcp_var = tk.BooleanVar(value=False)
-        self.dhcp_chk = ttk.Checkbutton(frame, text="使用 DHCP（自动获取 IP）", variable=self.dhcp_var,
-                                        command=self.on_dhcp_toggled)
-        self.dhcp_chk.grid(row=2, column=0, columnspan=2, sticky='w', pady=6)
+        self.gw_entry = self.add_input(frame, "默认网关", row=0, col=2, inivar="", entry_width=20)
+        #self.dns1_entry = self.add_input(frame, "主 DNS", row=1, col=0, inivar="", entry_width=20)
+        #self.dns2_entry = self.add_input(frame, "备选 DNS", row=1, col=1, inivar="", entry_width=20)
+        self.dhcp_cb = self.add_combobox(frame, "自动获取", row=2, col=0, listbox=["是","否"], width=5, inivar=-1)
+        self.dhcp_cb['combobox'].bind("<<ComboboxSelected>>", lambda e: self.dhcp_entry_state())
 
     def create_action_section(self):
-        frame = ttk.Frame(self)
+        frame = ttk.LabelFrame(self, text="修改操作", padding=8)
         frame.pack(side='top', fill='x', padx=10, pady=6)
-        self.apply_btn = self.add_button(frame, "应用修改", row=0, col=0, command=self.on_apply_clicked)
-        self.dhcp_btn = self.add_button(frame, "切换为 DHCP", row=0, col=1, command=self.on_set_dhcp)
-        self.refresh_info_btn = self.add_button(frame, "刷新当前信息", row=0, col=2, command=self.on_refresh_info)
+
+        self.apply_btn = self.add_button(frame, "应用修改", row=0, col=0, width=10, command=self.apply_btn_callback)
+        self.refresh_info_btn = self.add_button(frame, "刷新当前信息", row=0, col=2, width=15, command=self.refresh_network_callback)
 
     def create_output_section(self):
-        frame = ttk.LabelFrame(self, text="操作日志", padding=6)
+        frame = ttk.LabelFrame(self, text="输出信息", padding=6)
         frame.pack(side='top', fill='both', expand=True, padx=10, pady=6)
+
         self.result_box = scrolledtext.ScrolledText(frame, width=100, height=12)
         self.result_box.pack(fill='both', expand=True, padx=4, pady=4)
 
-    def _set_button_state(self, enabled: bool):
-        state = 'normal' if enabled else 'disabled'
-        for btn in [self.apply_btn, self.dhcp_btn, self.refresh_info_btn, self.refresh_btn]:
-            try:
-                btn.config(state=state)
-            except Exception:
-                pass
 
     # ---------------- 事件回调 ----------------
-    def on_refresh_clicked(self):
-        self._append_log("刷新网卡列表中...\n")
-        threading.Thread(target=self.refresh_interfaces, daemon=True).start()
+    def refresh_network_callback(self):
+        '''刷新当前网卡信息'''
+        # 刷新所有所有网卡信息
+        self.refresh_allnetwork()
+        # 获取选中的网卡信息
+        iface_name = self.iface_cb['var'].get()
+        config = self.get_network_config(iface_name)
+        # 不可修改配置
+        self.description_entry['var'].set(config.get("description", ""))
+        self.mac_entry['var'].set(config.get("mac", ""))
+        # 可修改配置
+        self.ip_entry['var'].set(config.get("ipv4", ""))
+        self.mask_entry['var'].set(config.get("netmask", ""))   
+        self.gw_entry['var'].set(config.get("gateway", ""))
+        #self.dns1_entry['var'].set(config.get("dns1", ""))
+        #self.dns2_entry['var'].set(config.get("dns2", ""))
+        if config.get("dhcp_enabled", "") == "是":
+            self.dhcp_cb['var'].set("是")
+        elif config.get("dhcp_enabled", "") == "否":
+            self.dhcp_cb['var'].set("否")
+        else:
+            self.dhcp_cb['var'].set("")
+        self.dhcp_entry_state()
+        self.get_network_settings()
+        self.output_network_settings()
 
-    def refresh_interfaces(self):
-        try:
-            adapters = self.netmgr.get_all_adapters()
-        except Exception as e:
-            self._append_log(f"获取网卡失败: {e}\n")
-            return
+    def get_network_config(self, iface_name):
+        '''根据网卡名称获取对应的配置信息'''
+        for config in self.networkconfigs:
+            if config.get("name") == iface_name:
+                return config
+        return None
 
-        names = [a.get("name") or a.get("desc") or str(i) for i, a in enumerate(adapters)]
+    def dhcp_entry_state(self):
+        '''根据 DHCP 选择框设置输入框状态'''
+        if self.dhcp_cb['var'].get() == "是":
+            # 禁用手动输入
+            self.ip_entry['entry'].config(state='disabled')
+            self.mask_entry['entry'].config(state='disabled')
+            self.gw_entry['entry'].config(state='disabled')
+        else:
+            # 启用手动输入
+            self.ip_entry['entry'].config(state='normal')
+            self.mask_entry['entry'].config(state='normal')
+            self.gw_entry['entry'].config(state='normal')
 
-        def update_ui():
-            self._adapters = adapters
-            self.iface_cb['values'] = names
-            if names:
-                self.iface_var.set(names[0])
-                self.load_selected_adapter_info(names[0])
-        self.after(0, update_ui)
-        self._append_log("网卡列表刷新完成。\n")
+    def get_network_settings(self):
+        '''获取当前输入的网卡配置信息'''
+        self.networkconfig = {
+            "name": re.sub(r"^(.*?(适配器))\s*", "", self.iface_cb['var'].get()).strip(),
+            "ipv4": self.ip_entry['var'].get(),
+            "netmask": self.mask_entry['var'].get(),
+            "gateway": self.gw_entry['var'].get(),
+            #"dns1": self.dns1_entry['var'].get(),
+            #"dns2": self.dns2_entry['var'].get(),
+            "dhcp_enabled": self.dhcp_cb['var'].get() == "是"
+        }
 
-    def on_iface_selected(self, event=None):
-        name = self.iface_var.get()
-        self.load_selected_adapter_info(name)
+    def output_network_settings(self):
+        '''输出当前网卡配置信息到日志框'''
+        self.result_box.insert(tk.END, f"当前网卡配置：\n")
+        for key, value in self.networkconfig.items():
+            self.result_box.insert(tk.END, f"  {key}: {value}\n")
+        self.result_box.see(tk.END)
 
-    def load_selected_adapter_info(self, name):
-        adapter = next((a for a in getattr(self, "_adapters", []) if a.get("name")==name or a.get("desc")==name), None)
-        if not adapter:
-            self._append_log(f"未找到网卡信息：{name}\n")
-            return
-
-        try:
-            self.ip_entry['var'].set(adapter.get("ip", ""))
-            self.mask_entry['var'].set(adapter.get("mask", ""))
-            self.gw_entry['var'].set(adapter.get("gateway", ""))
-            self.dns1_entry['var'].set(adapter.get("dns1", ""))
-            self.dns2_entry['var'].set(adapter.get("dns2", ""))
-        except Exception:
-            pass
-
-        self.dhcp_var.set(True if str(adapter.get("dhcp", "")).lower() in ("yes","true","是") else False)
-        self._append_log(f"已加载网卡：{name}  IP={adapter.get('ip')} 掩码={adapter.get('mask')} 网关={adapter.get('gateway')} DHCP={adapter.get('dhcp')} MAC={adapter.get('mac')}\n")
-
-    def on_dhcp_toggled(self):
-        use_dhcp = self.dhcp_var.get()
-        state = 'disabled' if use_dhcp else 'normal'
-        for entry in [self.ip_entry, self.mask_entry, self.gw_entry]:
-            try:
-                entry['entry'].config(state=state)
-            except Exception:
-                try:
-                    entry.config(state=state)
-                except Exception:
-                    pass
-
-    def on_refresh_info(self):
-        name = self.iface_var.get()
-        if not name:
-            messagebox.showwarning("提示", "请先选择一个网卡")
-            return
-        self._append_log(f"读取 {name} 的当前配置信息...\n")
-        threading.Thread(target=self._refresh_info_thread, args=(name,), daemon=True).start()
-
-    def _refresh_info_thread(self, name):
-        try:
-            adapters = self.netmgr.get_all_adapters()
-            self._adapters = adapters
-            for a in adapters:
-                if a.get("name")==name or a.get("desc")==name:
-                    self.after(0, lambda ad=a: self.load_selected_adapter_info(ad.get("name")))
-                    break
-            self._append_log("刷新完成。\n")
-        except Exception as e:
-            self._append_log(f"读取配置失败: {e}\n")
-
-    def on_apply_clicked(self):
-        name = self.iface_var.get()
-        if not name:
-            messagebox.showwarning("提示", "请选择一个网卡")
-            return
-
-        def read_field(field):
-            try: return field['var'].get().strip()
-            except Exception:
-                try: return field.get().strip()
-                except Exception: return ""
-
-        ip = read_field(self.ip_entry)
-        mask = read_field(self.mask_entry)
-        gw = read_field(self.gw_entry)
-        dns1 = read_field(self.dns1_entry)
-        dns2 = read_field(self.dns2_entry)
-
-        if self.dhcp_var.get():
-            if not messagebox.askyesno("确认", f"确定将网卡 [{name}] 切换为 DHCP 模式吗？"):
-                return
-            self._set_button_state(False)
-            threading.Thread(target=self._set_dhcp_thread, args=(name,), daemon=True).start()
-            return
-
-        if not ip or not mask:
-            messagebox.showwarning("输入错误", "IP 与掩码不能为空（或勾选 DHCP）")
-            return
-
-        self._set_button_state(False)
-        threading.Thread(target=self._set_static_thread, args=(name, ip, mask, gw, dns1, dns2), daemon=True).start()
-
-    def _set_dhcp_thread(self, name):
-        try:
-            res = self.netmgr.set_dhcp(name)
-            self._append_log(f"{res}\n")
-            messagebox.showinfo("完成", res)
-            threading.Thread(target=self.refresh_interfaces, daemon=True).start()
-        except Exception as e:
-            self._append_log(f"设置 DHCP 失败: {e}\n")
-            messagebox.showerror("失败", f"设置 DHCP 失败: {e}")
-        finally:
-            self._set_button_state(True)
-
-    def _set_static_thread(self, name, ip, mask, gw, dns1, dns2):
-        try:
-            res = self.netmgr.set_static_ip(name, ip, mask, gw)
-            self._append_log(f"{res}\n")
-            if dns1:
-                try:
-                    res_dns = self.netmgr.set_dns(name, dns1, dns2)
-                    self._append_log(f"{res_dns}\n")
-                except Exception as e:
-                    self._append_log(f"设置 DNS 失败: {e}\n")
-            messagebox.showinfo("完成", "配置已应用（请注意可能需要管理员权限）")
-            threading.Thread(target=self.refresh_interfaces, daemon=True).start()
-        except Exception as e:
-            self._append_log(f"应用静态 IP 失败: {e}\n")
-            messagebox.showerror("失败", f"应用静态 IP 失败: {e}")
-        finally:
-            self._set_button_state(True)
-
-    def on_set_dhcp(self):
-        name = self.iface_var.get()
-        if not name:
-            messagebox.showwarning("提示", "请选择一个网卡")
-            return
-        if not messagebox.askyesno("确认", f"确定将网卡 [{name}] 切换为 DHCP 模式吗？"):
-            return
-        self._set_button_state(False)
-        threading.Thread(target=self._set_dhcp_thread, args=(name,), daemon=True).start()
-
-    def _append_log(self, text: str):
-        try:
-            self.result_box.after(0, lambda: (self.result_box.insert(tk.END, text), self.result_box.see(tk.END)))
-        except Exception:
-            pass
+    def apply_btn_callback(self):
+        '''应用当前网卡配置信息'''
+        self.get_network_settings()
+        self.netmgr.set_network_info(self.networkconfig)
+        #self.refresh_allnetwork()

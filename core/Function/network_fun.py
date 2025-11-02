@@ -1,87 +1,127 @@
 import subprocess
+import locale
 import re
+import tkinter as tk
+from tkinter import scrolledtext, messagebox
+
+import logging
+
 
 class NetworkManager:
-    """获取并设置本机网络适配器信息（Windows）"""
+    """获取本地网卡详细信息（含 DNS、DHCP）"""
+    def __init__(self, result_box: scrolledtext.ScrolledText):
+        self.result_box = result_box
 
-    def get_all_adapters(self):
-        """返回本机所有网卡信息列表，每个网卡是字典"""
-        result = subprocess.run("ipconfig /all", capture_output=True, text=True, shell=True)
-        lines = result.stdout.splitlines()
+    def get_network_info(self):
+        # 自动获取系统编码（例如 'cp936' 中文Windows）
+        system_encoding = locale.getpreferredencoding(False)
         
+        # 调用 ipconfig /all
+        result = subprocess.run(
+            "ipconfig /all",
+            shell=True,
+            capture_output=True,
+            text=True,
+            encoding=system_encoding,  # 自动根据系统语言选择
+            errors="ignore"            # 忽略解码错误
+        )
+
+        output = result.stdout
+        if not output:
+            raise RuntimeError("无法获取 ipconfig 输出，请检查系统命令执行权限。")
+
+        # 按块拆分
+        import re
+        adapter_blocks = re.split(r"\r?\n(?=\S.*?:)", output)
+
         adapters = []
-        adapter = None
-        
-        for line in lines:
-            line = line.strip()
-            if not line:
+        for block in adapter_blocks:
+            if not re.search(r"适配器", block):
                 continue
 
-            # 匹配网卡名称
-            m = re.match(r'(?:以太网适配器|无线局域网适配器|未知适配器|Ethernet|Wi-Fi|Adapter)\s*(.+):', line)
-            if m:
-                if adapter:
-                    adapters.append(adapter)
-                adapter = {
-                    'name': m.group(1),
-                    'ip': '',
-                    'mask': '',
-                    'gateway': '',
-                    'dns1': '',
-                    'dns2': '',
-                    'dhcp': '',
-                    'media': '',
-                    'desc': ''
-                }
-                continue
+            info = {}
+            match = re.match(r"(.+?):", block)
+            if match:
+                info["name"] = match.group(1).strip()
 
-            if adapter is None:
-                continue
+            match = re.search(r"描述.*?:\s*(.+)", block)
+            if match:
+                info["description"] = match.group(1).strip()
 
-            # 解析字段
-            if "IPv4 地址" in line or "IPv4 Address" in line:
-                adapter['ip'] = line.split(':')[-1].strip().split('(')[0]
-            elif "子网掩码" in line or "Subnet Mask" in line:
-                adapter['mask'] = line.split(':')[-1].strip()
-            elif "默认网关" in line or "Default Gateway" in line:
-                if not adapter['gateway']:
-                    adapter['gateway'] = line.split(':')[-1].strip()
-            elif "DHCP 已启用" in line or "DHCP Enabled" in line:
-                adapter['dhcp'] = line.split(':')[-1].strip()
-            elif "媒体状态" in line or "Media State" in line:
-                adapter['media'] = line.split(':')[-1].strip()
-            elif "描述" in line or "Description" in line:
-                adapter['desc'] = line.split(':')[-1].strip()
-            elif "DNS 服务器" in line or "DNS Servers" in line:
-                dns = line.split(':')[-1].strip()
-                if not adapter['dns1']:
-                    adapter['dns1'] = dns
-                elif not adapter['dns2']:
-                    adapter['dns2'] = dns
+            match = re.search(r"物理地址.*?:\s*(.+)", block)
+            if match:
+                info["mac"] = match.group(1).strip()
 
-        if adapter:
-            adapters.append(adapter)
+            match = re.search(r"DHCP 已启用.*?:\s*(.+)", block)
+            if match:
+                value = match.group(1).strip()
+                info["dhcp_enabled"] = "是" if value == "是" else "否"
 
+            match = re.search(r"IPv4 地址.*?:\s*([0-9.]+)", block)
+            if match:
+                info["ipv4"] = match.group(1)
+
+            match = re.search(r"子网掩码.*?:\s*([0-9.]+)", block)
+            if match:
+                info["netmask"] = match.group(1)
+
+            gateway = ""
+            # 先找出 "默认网关" 所在行及后续可能的下一行
+            gw_match = re.search(r"默认网关[.\s:]*([^\r\n]*)\r?\n(?:\s*([^\r\n]+))?", block)
+            if gw_match:
+                # 合并两行文本
+                gw_text = " ".join(gw_match.groups(default=""))
+                # 提取 IPv4 地址
+                ipv4_match = re.search(r"\b\d{1,3}(?:\.\d{1,3}){3}\b", gw_text)
+                if ipv4_match:
+                    gateway = ipv4_match.group(0)
+            info["gateway"] = gateway
+
+            # --- DNS 服务器提取（支持多行 + IPv4优先）---
+            dns1 = dns2 = ""
+            # 找出 “DNS 服务器” 开始的位置
+            dns_match = re.search(r"DNS 服务器[.\s:]*([^\r\n]*)((?:\r?\n\s+[^\r\n]+)*)", block)
+            if dns_match:
+                # 合并所有行
+                dns_text = dns_match.group(1) + dns_match.group(2)
+                # 提取所有 IPv4 地址（优先），如果没有，再取 IPv6
+                dns_ipv4 = re.findall(r"\b\d{1,3}(?:\.\d{1,3}){3}\b", dns_text)
+                if dns_ipv4:
+                    dns1 = dns_ipv4[0]
+                    if len(dns_ipv4) > 1:
+                        dns2 = dns_ipv4[1]
+                else:
+                    # 没有 IPv4，则尝试 IPv6
+                    dns_ipv6 = re.findall(r"[a-fA-F0-9:]+(?:%[0-9]+)?", dns_text)
+                    if dns_ipv6:
+                        dns1 = dns_ipv6[0]
+                        if len(dns_ipv6) > 1:
+                            dns2 = dns_ipv6[1]
+
+            info["dns1"] = dns1
+            info["dns2"] = dns2
+
+            adapters.append(info)
         return adapters
+    
+    def set_network_info(self, settings):
+        """设置指定网卡的网络配置"""
+        try:
+            self.result_box.insert(tk.END, f"尝试将网卡配置修改为：\n")
+            for key, value in settings.items():
+                self.result_box.insert(tk.END, f"  {key}: {value}\n")  
+            if settings['dhcp_enabled']:
+                # 启用 DHCP 自动获取 IP 地址
+                subprocess.run(
+                    f'netsh interface ip set address name="{settings['name']}" source=dhcp',
+                    shell=True, check=True
+                )
+            else:
+                subprocess.run(
+                    f'netsh interface ip set address name="{settings['name']}" source=static addr={settings['ipv4']} mask={settings['netmask']} gateway={settings['gateway']}', 
+                    shell=True, check=True)
+            self.result_box.insert(tk.END, f"网络配置设置完成\n")
 
-    def set_static_ip(self, name, ip, mask, gateway):
-        """设置静态 IP"""
-        cmd = f'netsh interface ip set address name="{name}" static {ip} {mask} {gateway} 1'
-        return subprocess.run(cmd, shell=True, capture_output=True, text=True, encoding="gbk").stdout
-
-    def set_dhcp(self, name):
-        """切换 DHCP"""
-        cmd1 = f'netsh interface ip set address name="{name}" dhcp'
-        cmd2 = f'netsh interface ip set dns name="{name}" dhcp'
-        out1 = subprocess.run(cmd1, shell=True, capture_output=True, text=True, encoding="gbk").stdout
-        out2 = subprocess.run(cmd2, shell=True, capture_output=True, text=True, encoding="gbk").stdout
-        return out1 + "\n" + out2
-
-    def set_dns(self, name, dns1, dns2=None):
-        """设置 DNS"""
-        cmd1 = f'netsh interface ip set dns name="{name}" static {dns1} primary'
-        out = subprocess.run(cmd1, shell=True, capture_output=True, text=True, encoding="gbk").stdout
-        if dns2:
-            cmd2 = f'netsh interface ip add dns name="{name}" {dns2} index=2'
-            out += subprocess.run(cmd2, shell=True, capture_output=True, text=True, encoding="gbk").stdout
-        return out
+        except subprocess.CalledProcessError as e:
+            self.result_box.insert(tk.END, f"设置{settings['name']}网络配置失败: {e}\n")
+        self.result_box.see(tk.END)
