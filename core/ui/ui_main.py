@@ -5,6 +5,7 @@ from core.ui.basic_ui import BasicUI
 from core.ui.tab_ping import PingTab
 from core.ui.tab_telnet import TelnetTab
 from core.ui.tab_network import NetworkTab
+from core.ui.tab_tracert import TracertTab
 
 import logging
 logger = logging.getLogger(__name__)
@@ -22,7 +23,8 @@ class MainUI(BasicUI):
         self.tabs = {
             "网卡设置": NetworkTab(self.tab_control),
             "Ping测试": PingTab(self.tab_control),
-            "端口扫描服务端": TelnetTab(self.tab_control),
+            "端口扫描": TelnetTab(self.tab_control),
+            "路由追踪": TracertTab(self.tab_control),
         }
         # 添加到 Notebook
         for name, tab in self.tabs.items():

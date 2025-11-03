@@ -53,7 +53,7 @@ class PingFun:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 universal_newlines=True,
-                creationflags=creationflags  # ✅ 加上这个！
+                creationflags=creationflags 
             )
             for line in iter(self.process.stdout.readline, ''):
                 if self.stop_flag:
@@ -127,6 +127,7 @@ class PingFun:
             return f"{ip} 错误: {e}\n"
 
     def _concurrent_batch_ping(self, net_prefix, start, end, local_ip=None):
+        '''并发批量 Ping'''
         ip_list = [f"{net_prefix}{i}" for i in range(start, end + 1)]
         max_workers = min(50, len(ip_list))
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
