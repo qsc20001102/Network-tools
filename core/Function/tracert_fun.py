@@ -1,84 +1,69 @@
-import subprocess
 import threading
-import tkinter as tk
-from tkinter import scrolledtext, messagebox
+from typing import Callable, Optional
+
+from core.Function.common import popen_hidden, validate_host
+
+
+OutputCallback = Callable[[str, Optional[str]], None]
+DoneCallback = Callable[[], None]
 
 
 class TracertFun:
-    def __init__(self, result_box: scrolledtext.ScrolledText):
-        self.result_box = result_box
+    def __init__(self, output: OutputCallback, done: Optional[DoneCallback] = None):
+        self.output = output
+        self.done = done or (lambda: None)
         self.process = None
-        self.stop_flag = False
+        self.stop_event = threading.Event()
+        self.worker = None
 
-    def _append_text(self, text: str):
-        """线程安全地输出到文本框"""
-        self.result_box.after(0, lambda: (
-            self.result_box.insert(tk.END, text),
-            self.result_box.see(tk.END)
-        ))
+    def start_tracert(self, target: str, max_hops: int = 20, timeout_ms: int = 800) -> None:
+        target = validate_host(target)
+        max_hops = max(1, min(int(max_hops), 64))
+        timeout_ms = max(100, min(int(timeout_ms), 10000))
 
-    def start_tracert(self, target: str):
-        """开始追踪"""
-        if self.process:
-            messagebox.showwarning("警告", "⚠️ 正在运行，请先停止再启动。")
-            return
+        if self.is_running():
+            raise RuntimeError("路由追踪正在运行，请先停止当前任务")
 
-        if not target.strip():
-            messagebox.showwarning("提示", "请输入目标地址！")
-            return
+        self.stop_event.clear()
+        command = ["tracert", "-d", "-w", str(timeout_ms), "-h", str(max_hops), target]
+        self.output(f"开始路由追踪: {target}，最大 {max_hops} 跳，超时 {timeout_ms}ms\n\n", "muted")
+        self.worker = threading.Thread(target=self._run, args=(command,), daemon=True)
+        self.worker.start()
 
-        cmd = f'tracert -d -w 500 -h 20 {target}'
-        self.stop_flag = False
-
-        self._append_text(f"\n=== 开始追踪 {target} ===\n\n")
-
-        thread = threading.Thread(target=self._run_tracert, args=(cmd,))
-        thread.daemon = True
-        thread.start()
-
-    def _run_tracert(self, cmd: str):
-        """执行 tracert 命令"""
+    def _run(self, command) -> None:
         try:
-            self.process = subprocess.Popen(
-                cmd,
-                shell=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                creationflags=subprocess.CREATE_NO_WINDOW  # 隐藏控制台窗口
-            )
-
+            self.process = popen_hidden(command)
+            if not self.process.stdout:
+                return
             for line in self.process.stdout:
-                if self.stop_flag:
+                if self.stop_event.is_set():
                     break
-                self._append_text(line)
-
-        except Exception as e:
-            self._append_text(f"\n❌ 错误: {e}\n")
-
+                self.output(line, None)
+        except Exception as exc:
+            self.output(f"\n路由追踪失败: {exc}\n", "error")
         finally:
-            # 安全关闭进程
             if self.process:
                 try:
                     self.process.terminate()
                 except Exception:
                     pass
                 self.process = None
-
-            if self.stop_flag:
-                self._append_text("\n=== 已停止追踪 ===\n")
+            if self.stop_event.is_set():
+                self.output("\n路由追踪已停止\n", "warning")
             else:
-                self._append_text("\n--- 追踪结束 ---\n")
+                self.output("\n路由追踪完成\n", "success")
+            self.done()
 
-    def stop_tracert(self):
-        """停止追踪"""
+    def stop_tracert(self) -> None:
+        if not self.is_running():
+            raise RuntimeError("当前没有正在运行的路由追踪")
+        self.stop_event.set()
         if self.process:
-            self.stop_flag = True
             try:
                 self.process.terminate()
             except Exception:
                 pass
-            self.process = None
-            self._append_text("\n=== 已手动停止追踪 ===\n")
-        else:
-            messagebox.showinfo("提示", "当前没有正在运行的追踪任务。")
+        self.output("\n正在停止路由追踪...\n", "warning")
+
+    def is_running(self) -> bool:
+        return bool(self.worker and self.worker.is_alive())

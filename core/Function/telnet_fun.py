@@ -1,251 +1,581 @@
+import concurrent.futures
+import csv
+import ipaddress
+import re
 import socket
 import threading
-import concurrent.futures
-import tkinter as tk
-from tkinter import scrolledtext, messagebox
-from typing import Iterable, Optional, List
+import time
+from dataclasses import asdict, dataclass, field
+from typing import Callable, Iterable, Optional
+
+from core.Function.common import parse_ports, validate_host, validate_port
+
+
+OutputCallback = Callable[[str, Optional[str]], None]
+DoneCallback = Callable[[], None]
+StatusCallback = Callable[[dict], None]
+ResultCallback = Callable[[dict], None]
+
+
+STATUS_TEXT = {
+    "open": "开放",
+    "closed": "关闭",
+    "timeout": "超时",
+    "unreachable": "不可达",
+    "dns_error": "解析失败",
+    "cancelled": "已取消",
+    "error": "错误",
+}
+
+COMMON_SERVICES = {
+    20: "FTP-DATA",
+    21: "FTP",
+    22: "SSH",
+    23: "TELNET",
+    25: "SMTP",
+    53: "DNS",
+    67: "DHCP",
+    68: "DHCP",
+    80: "HTTP",
+    110: "POP3",
+    123: "NTP",
+    135: "MSRPC",
+    137: "NETBIOS",
+    138: "NETBIOS",
+    139: "NETBIOS",
+    143: "IMAP",
+    389: "LDAP",
+    443: "HTTPS",
+    445: "SMB",
+    465: "SMTPS",
+    587: "SMTP",
+    636: "LDAPS",
+    993: "IMAPS",
+    995: "POP3S",
+    1433: "MSSQL",
+    1521: "ORACLE",
+    3306: "MYSQL",
+    3389: "RDP",
+    5432: "POSTGRES",
+    5900: "VNC",
+    5985: "WINRM",
+    5986: "WINRM-SSL",
+    6379: "REDIS",
+    8000: "HTTP-ALT",
+    8080: "HTTP-ALT",
+    8443: "HTTPS-ALT",
+    9200: "ELASTIC",
+    27017: "MONGODB",
+}
+
+HTTP_BANNER_PORTS = {80, 8000, 8008, 8080, 8081, 8888, 9000}
+
+
+@dataclass
+class ScanOptions:
+    timeout_ms: int = 800
+    workers: int = 128
+    show_closed: bool = False
+    banner_probe: bool = False
+
+
+@dataclass
+class PortResult:
+    host: str
+    resolved_ip: str
+    ip_version: str
+    port: int
+    service: str
+    status: str
+    status_text: str
+    latency_ms: float = 0.0
+    banner: str = ""
+    error: str = ""
+    checked_at: str = field(default_factory=lambda: time.strftime("%Y-%m-%d %H:%M:%S"))
+
+    def to_dict(self) -> dict:
+        data = asdict(self)
+        data["latency_ms"] = round(self.latency_ms, 1)
+        return data
+
+
+@dataclass
+class ScanStats:
+    total: int = 0
+    scanned: int = 0
+    open_count: int = 0
+    closed_count: int = 0
+    timeout_count: int = 0
+    unreachable_count: int = 0
+    dns_error_count: int = 0
+    error_count: int = 0
+    cancelled_count: int = 0
+    started_at: float = field(default_factory=time.perf_counter)
+
+    def record(self, status: str, count: int = 1) -> None:
+        self.scanned += count
+        if status == "open":
+            self.open_count += count
+        elif status == "closed":
+            self.closed_count += count
+        elif status == "timeout":
+            self.timeout_count += count
+        elif status == "unreachable":
+            self.unreachable_count += count
+        elif status == "dns_error":
+            self.dns_error_count += count
+        elif status == "cancelled":
+            self.cancelled_count += count
+        else:
+            self.error_count += count
+
+    def snapshot(self, state: str) -> dict:
+        elapsed = time.perf_counter() - self.started_at
+        progress = self.scanned / self.total * 100 if self.total else 0.0
+        return {
+            "state": state,
+            "total": self.total,
+            "scanned": self.scanned,
+            "open": self.open_count,
+            "closed": self.closed_count,
+            "timeout": self.timeout_count,
+            "unreachable": self.unreachable_count,
+            "dns_error": self.dns_error_count,
+            "error": self.error_count,
+            "cancelled": self.cancelled_count,
+            "progress": progress,
+            "elapsed": elapsed,
+        }
 
 
 class PortScanner:
-    """
-    PortScanner: 在 Tkinter 的 ScrolledText 中显示端口检测结果的工具类。
+    def __init__(
+        self,
+        output: OutputCallback,
+        done: Optional[DoneCallback] = None,
+        status: Optional[StatusCallback] = None,
+        result: Optional[ResultCallback] = None,
+    ):
+        self.output = output
+        self.done = done or (lambda: None)
+        self.status = status or (lambda _stats: None)
+        self.result = result or (lambda _result: None)
+        self.stop_event = threading.Event()
+        self.scan_thread = None
+        self.executor = None
+        self.last_results: list[dict] = []
 
-    构造：
-        scanner = PortScanner(result_box)
+    def test_connect(self, host: str, port: int, timeout: float = 1.0, options: Optional[dict] = None) -> None:
+        options = self.normalize_options(options or {"timeout_ms": int(timeout * 1000), "workers": 1, "show_closed": True})
+        host = validate_host(host)
+        port = validate_port(port)
+        self._start_scan([host], [port], options, "单端口测试")
 
-    方法：
-        test_connect(ip, port, timeout=1.0)
-            - 直接测试单个 ip:port 是否可连通（立即返回 bool，并在结果框显示一行结果）
+    def start_text_scan(self, host: str, ports_text: str, timeout: float = 0.8, options: Optional[dict] = None) -> None:
+        options = self.normalize_options(options or {"timeout_ms": int(timeout * 1000)})
+        self.start_list_scan(host, parse_ports(ports_text), timeout=timeout, options=options)
 
-        start_range_scan(ip, start_port, end_port, timeout=1.0, max_workers=100)
-            - 并发扫描端口范围 [start_port, end_port]（包含端口边界）
-            - 扫描结果会实时写入 result_box
+    def start_range_scan(self, host: str, start_port: int, end_port: int, timeout: float = 0.8, options: Optional[dict] = None) -> None:
+        start_port = validate_port(start_port, "起始端口")
+        end_port = validate_port(end_port, "结束端口")
+        if start_port > end_port:
+            raise ValueError("起始端口不能大于结束端口")
+        options = self.normalize_options(options or {"timeout_ms": int(timeout * 1000)})
+        self.start_list_scan(host, range(start_port, end_port + 1), timeout=timeout, options=options)
 
-        start_list_scan(ip, ports: Iterable[int], timeout=1.0, max_workers=100)
-            - 并发扫描给定端口列表
+    def start_list_scan(
+        self,
+        host: str,
+        ports: Iterable[int],
+        timeout: float = 0.8,
+        options: Optional[dict] = None,
+    ) -> None:
+        host = validate_host(host)
+        ports = normalize_ports(ports)
+        options = self.normalize_options(options or {"timeout_ms": int(timeout * 1000)})
+        self._start_scan([host], ports, options, "端口扫描")
 
-        stop_scan()
-            - 尝试中止正在进行的扫描（设置停止标志，后续任务检测到后会停止提交或返回）
+    def start_scan(self, host: str, ports_text: str, options: Optional[dict] = None) -> None:
+        host = validate_host(host)
+        ports = parse_ports(ports_text)
+        self._start_scan([host], ports, self.normalize_options(options), "端口扫描")
 
-    注意：
-        - 使用 TCP 连接测试（socket.connect），适合服务端口检测。
-        - GUI 写入通过 self._append_text(...) 调度到主线程，保证线程安全。
-    """
+    def start_batch_scan(self, hosts_text: str, ports_text: str, options: Optional[dict] = None) -> None:
+        hosts = parse_scan_hosts(hosts_text)
+        ports = parse_ports(ports_text)
+        self._start_scan(hosts, ports, self.normalize_options(options), "批量主机扫描")
 
-    def __init__(self, result_box: scrolledtext.ScrolledText):
-        self.result_box = result_box
+    def _start_scan(self, hosts: list[str], ports: list[int], options: ScanOptions, title: str) -> None:
+        if self.is_scanning():
+            raise RuntimeError("端口扫描正在运行，请先停止当前任务")
+        if not ports:
+            raise ValueError("请输入至少一个端口")
 
-        # 扫描控制状态
-        self._stop_flag = False               # 外部调用 stop_scan() 会把此标志设为 True
-        self._scan_thread: Optional[threading.Thread] = None
-        self._executor: Optional[concurrent.futures.ThreadPoolExecutor] = None
+        self.stop_event.clear()
+        self.last_results = []
+        total = len(hosts) * len(ports)
+        self.output(f"开始{title}: {len(hosts)} 个目标，{len(ports)} 个端口，共 {total} 次连接\n", "muted")
+        self.output(self.describe_options(options), "muted")
+        self.status(ScanStats(total=total).snapshot("运行中"))
+        self.scan_thread = threading.Thread(target=self._scan, args=(hosts, ports, options, title), daemon=True)
+        self.scan_thread.start()
 
-        # 用于统计（可选）
-        self._total = 0
-        self._done = 0
-        self._open_ports: List[int] = []
-
-    # -------------------------
-    # 辅助方法：线程安全地向结果框写文本
-    # -------------------------
-    def _append_text(self, text: str):
-        """
-        把文本插入到 result_box。因为可能从子线程调用，所以用 after 调度到主线程执行。
-        """
-        try:
-            # schedule on main thread immediately
-            self.result_box.after(0, lambda: (self.result_box.insert(tk.END, text), self.result_box.see(tk.END)))
-        except Exception:
-            # 在极少数情况下（例如 result_box 已销毁），捕获异常避免崩溃
-            pass
-
-    # -------------------------
-    # 单端口测试
-    # -------------------------
-    def test_connect(self, ip: str, port: int, timeout: float = 1.0) -> bool:
-        """
-        立即测试单个 ip:port 是否可以 TCP 连接。
-        - 返回 True（可连通）或 False（不可连通）
-        - 同时把结果写入 result_box（通过主线程调度）
-        """
-        addr = (ip, int(port))
-        status = False
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(timeout)
-            sock.connect(addr)
-            status = True
-            sock.close()
-        except Exception:
-            status = False
-
-        # 输出结果（在 GUI 中显示）
-        self._append_text(f"{ip}:{port} {'✅ 开放' if status else '❌ 关闭/不可达'}\n")
-        return status
-
-    # -------------------------
-    # 并发单端口任务（内部使用）
-    # -------------------------
-    def _scan_single_port(self, ip: str, port: int, timeout: float) -> str:
-        """
-        线程池中运行的单个端口检测任务，返回一行结果字符串。
-        任务必须尽量短小（快速返回），并在开始前检查 stop_flag。
-        """
-        if self._stop_flag:
-            return ""  # 为空表示不输出
+    def _scan(self, hosts: list[str], ports: list[int], options: ScanOptions, title: str) -> None:
+        stats = ScanStats(total=len(hosts) * len(ports))
+        resolved_hosts = []
 
         try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(timeout)
-            sock.connect((ip, port))
-            sock.close()
-            result = f"{ip}:{port} ✅ 开放\n"
-            # 记录到本地开放端口列表（线程安全地追加）
-            self._open_ports.append(port)
-        except Exception:
-            result = f"{ip}:{port} ❌ 关闭/不可达\n"
+            for host in hosts:
+                if self.stop_event.is_set():
+                    break
+                info = resolve_host(host)
+                if info["ok"]:
+                    resolved_hosts.append(info)
+                    suffix = "" if info["resolved_ip"] == host else f" -> {info['resolved_ip']}"
+                    self.output(f"解析: {host}{suffix} ({info['ip_version']})\n", "muted")
+                else:
+                    self._record_host_error(host, info["error"], len(ports), stats)
 
-        # 更新进度计数（最好在主线程更新显示，这里在子线程更新计数）
-        self._done += 1
-        return result
+            workers = min(options.workers, max(1, stats.total))
+            pair_iter = iter((host_info, port) for host_info in resolved_hosts for port in ports)
+            futures = {}
+            exhausted = False
 
-    # -------------------------
-    # 并发扫描（范围或列表）
-    # -------------------------
-    def start_range_scan(self, ip: str, start_port: int, end_port: int, timeout: float = 0.8, max_workers: int = 200):
-        """
-        并发扫描端口范围 [start_port, end_port]（含两端）。
-        结果实时写入 result_box。单次扫描在后台线程中运行（不会阻塞主线程）。
-        """
-        # 参数校验（基本）
-        try:
-            start_port = int(start_port); end_port = int(end_port)
-        except Exception:
-            messagebox.showwarning("输入错误", "起始端口和结束端口必须为整数")
-            return
-        if start_port < 1 or end_port > 65535 or start_port > end_port:
-            messagebox.showwarning("输入错误", "端口范围不合法（1-65535 且 起始<=结束）")
-            return
-
-        ports = list(range(start_port, end_port + 1))
-        self.start_list_scan(ip, ports, timeout=timeout, max_workers=max_workers)
-
-    def start_list_scan(self, ip: str, ports: Iterable[int], timeout: float = 0.8, max_workers: int = 200):
-        """
-        并发扫描指定的端口列表。
-        - ip: 目标 IP（字符串）
-        - ports: 可迭代的端口集合（如 list、range 等）
-        - timeout: 单端口连接超时（秒）
-        - max_workers: 最大并发数（线程池大小）
-        """
-        # 防止重复启动
-        if self._scan_thread and self._scan_thread.is_alive():
-            messagebox.showinfo("提示", "已有扫描任务在运行，请先停止后再启动新的扫描。")
-            return
-
-        # 将 ports 转为列表并进行基本校验
-        try:
-            ports_list = [int(p) for p in ports]
-        except Exception:
-            messagebox.showwarning("输入错误", "端口列表包含非法值")
-            return
-        if not ports_list:
-            messagebox.showwarning("输入错误", "端口列表为空")
-            return
-        for p in ports_list:
-            if p < 1 or p > 65535:
-                messagebox.showwarning("输入错误", f"端口 {p} 不在合法范围 1-65535")
-                return
-
-        # 重置状态
-        self._stop_flag = False
-        self._open_ports = []
-        self._total = len(ports_list)
-        self._done = 0
-
-        # 清空 result_box 并输出起始信息（主线程调度）
-        self._append_text(f"开始并发端口扫描：目标 {ip}，共 {self._total} 个端口\n")
-
-        # 后台线程用于管理线程池与结果收集，确保 GUI 不阻塞
-        def manager():
-            # 根据任务数自适应限制并发数
-            actual_workers = max(1, min(max_workers, self._total))
-            self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=actual_workers)
-
-            # 提交任务
-            futures = {self._executor.submit(self._scan_single_port, ip, port, timeout): port for port in ports_list}
-
-            try:
-                # as_completed 会在每个 future 完成时迭代返回
-                for fut in concurrent.futures.as_completed(futures):
-                    if self._stop_flag:
-                        # 如果外部发出停止信号，尽量取消未开始的 future（cancel 返回 True 表示取消成功）
-                        # 线程池中的任务可能已在运行, cancel 只能取消未开始的任务
-                        break
-
+            self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=workers)
+            while not self.stop_event.is_set() and (futures or not exhausted):
+                while not self.stop_event.is_set() and not exhausted and len(futures) < workers * 2:
                     try:
-                        line = fut.result()
-                    except Exception as e:
-                        line = f"{ip}:{futures.get(fut)} 错误: {e}\n"
+                        host_info, port = next(pair_iter)
+                    except StopIteration:
+                        exhausted = True
+                        break
+                    futures[self.executor.submit(self._scan_port, host_info, port, options)] = (host_info, port)
 
-                    if line:
-                        # 把结果写回 GUI（通过 _append_text 安全调度）
-                        self._append_text(line)
+                if not futures:
+                    break
 
-                    # 可选：显示进度（例如：done/total）
-                    self._append_text(f"进度: {self._done}/{self._total}\n")
+                done, _pending = concurrent.futures.wait(
+                    futures,
+                    timeout=0.15,
+                    return_when=concurrent.futures.FIRST_COMPLETED,
+                )
+                for future in done:
+                    context = futures.pop(future, None)
+                    try:
+                        item = future.result()
+                    except Exception as exc:
+                        host_info, port = context or ({"host": "", "resolved_ip": "", "ip_version": ""}, 0)
+                        item = PortResult(
+                            host=host_info["host"],
+                            resolved_ip=host_info["resolved_ip"],
+                            ip_version=host_info["ip_version"],
+                            port=port,
+                            service=service_name(port),
+                            status="error",
+                            status_text=STATUS_TEXT["error"],
+                            error=str(exc),
+                        )
+                    self._record_result(item, stats, options)
 
-                # 如果 stop_flag 已设，尝试取消尚未开始的任务
-                if self._stop_flag:
-                    for f in futures:
-                        f.cancel()
+            if self.stop_event.is_set():
+                for future in futures:
+                    future.cancel()
+        finally:
+            if self.executor:
+                self.executor.shutdown(wait=False, cancel_futures=True)
+                self.executor = None
 
-            finally:
-                # 关闭线程池
-                if self._executor:
-                    self._executor.shutdown(wait=False)
-                    self._executor = None
+            state = "已停止" if self.stop_event.is_set() else "已完成"
+            self.status(stats.snapshot(state))
+            self.last_results = sorted(self.last_results, key=result_sort_key)
+            self._write_summary(title, stats, state)
+            self.done()
 
-                # 最终输出总结信息（开放端口列表）
-                if not self._stop_flag:
-                    self._append_text("\n端口扫描完成。\n")
-                else:
-                    self._append_text("\n端口扫描已停止。\n")
+    def _record_host_error(self, host: str, error: str, port_count: int, stats: ScanStats) -> None:
+        item = PortResult(
+            host=host,
+            resolved_ip="",
+            ip_version="",
+            port=0,
+            service="",
+            status="dns_error",
+            status_text=STATUS_TEXT["dns_error"],
+            error=error,
+        )
+        stats.record("dns_error", port_count)
+        self.last_results.append(item.to_dict())
+        self.result(item.to_dict())
+        self.output(f"{host}  解析失败: {error}\n", "warning")
+        self.status(stats.snapshot("运行中"))
 
-                if self._open_ports:
-                    self._append_text(f"开放端口: {sorted(self._open_ports)}\n")
-                else:
-                    self._append_text("未发现开放端口。\n")
+    def _record_result(self, item: PortResult, stats: ScanStats, options: ScanOptions) -> None:
+        stats.record(item.status)
+        row = item.to_dict()
+        self.last_results.append(row)
+        self.result(row)
 
-        # 启动后台管理线程
-        self._scan_thread = threading.Thread(target=manager, daemon=True)
-        self._scan_thread.start()
+        should_print = options.show_closed or item.status == "open" or item.status in {"dns_error", "error"}
+        if should_print:
+            tag = "success" if item.status == "open" else "warning" if item.status != "closed" else None
+            latency = f"{item.latency_ms:.0f} ms" if item.latency_ms else "-"
+            detail = item.banner or item.error
+            detail = f"  {detail}" if detail else ""
+            self.output(
+                f"[{stats.scanned}/{stats.total}] {item.host}:{item.port:<5} "
+                f"{item.service:<10} {item.status_text:<6} {latency}{detail}\n",
+                tag,
+            )
 
-    # -------------------------
-    # 停止扫描
-    # -------------------------
-    def stop_scan(self):
-        """
-        请求停止正在进行的扫描：设置停止标志并尝试关闭线程池。
-        - 已提交并正在运行的 socket.connect 调用无法被立即中断（但后续任务会被取消）
-        - stop_scan 尽快返回，实际终止需要等待正在运行的任务完成或超时
-        """
-        if not (self._scan_thread and self._scan_thread.is_alive()):
-            messagebox.showinfo("提示", "当前没有正在运行的扫描任务。")
-            return
+        self.status(stats.snapshot("运行中"))
 
-        self._append_text("\n正在停止扫描，请稍候...\n")
-        self._stop_flag = True
+    def _scan_port(self, host_info: dict, port: int, options: ScanOptions) -> PortResult:
+        if self.stop_event.is_set():
+            return PortResult(
+                host=host_info["host"],
+                resolved_ip=host_info["resolved_ip"],
+                ip_version=host_info["ip_version"],
+                port=port,
+                service=service_name(port),
+                status="cancelled",
+                status_text=STATUS_TEXT["cancelled"],
+            )
 
-        # 尝试立即关闭线程池（不等待正在运行任务）
-        if self._executor:
-            try:
-                self._executor.shutdown(wait=False)
-            except Exception:
-                pass
+        started = time.perf_counter()
+        timeout = options.timeout_ms / 1000
+        try:
+            with socket.create_connection((host_info["resolved_ip"], port), timeout=timeout) as sock:
+                elapsed = (time.perf_counter() - started) * 1000
+                banner = self._read_banner(sock, host_info["host"], port, timeout) if options.banner_probe else ""
+                return PortResult(
+                    host=host_info["host"],
+                    resolved_ip=host_info["resolved_ip"],
+                    ip_version=host_info["ip_version"],
+                    port=port,
+                    service=service_name(port),
+                    status="open",
+                    status_text=STATUS_TEXT["open"],
+                    latency_ms=elapsed,
+                    banner=banner,
+                )
+        except socket.timeout:
+            return self._closed_result(host_info, port, "timeout", "连接超时")
+        except OSError as exc:
+            status = classify_os_error(exc)
+            return self._closed_result(host_info, port, status, clean_error(exc))
 
-    # -------------------------
-    # 可选：返回当前扫描状态（供外部查询）
-    # -------------------------
+    def _closed_result(self, host_info: dict, port: int, status: str, error: str) -> PortResult:
+        return PortResult(
+            host=host_info["host"],
+            resolved_ip=host_info["resolved_ip"],
+            ip_version=host_info["ip_version"],
+            port=port,
+            service=service_name(port),
+            status=status,
+            status_text=STATUS_TEXT.get(status, STATUS_TEXT["error"]),
+            error=error,
+        )
+
+    def _read_banner(self, sock: socket.socket, host: str, port: int, timeout: float) -> str:
+        try:
+            sock.settimeout(min(max(timeout, 0.25), 1.0))
+            if port in HTTP_BANNER_PORTS:
+                request = f"HEAD / HTTP/1.0\r\nHost: {host}\r\nConnection: close\r\n\r\n"
+                sock.sendall(request.encode("ascii", errors="ignore"))
+            data = sock.recv(256)
+        except Exception:
+            return ""
+        text = data.decode("utf-8", errors="replace")
+        text = re.sub(r"\s+", " ", text.replace("\x00", " ")).strip()
+        return text[:160]
+
+    def stop_scan(self) -> None:
+        if not self.is_scanning():
+            raise RuntimeError("当前没有正在运行的端口扫描")
+        self.stop_event.set()
+        if self.executor:
+            self.executor.shutdown(wait=False, cancel_futures=True)
+        self.output("\n正在停止端口扫描...\n", "warning")
+
+    def export_results(self, path: str) -> None:
+        if not self.last_results:
+            raise RuntimeError("还没有可导出的端口扫描结果")
+        fields = [
+            "host",
+            "resolved_ip",
+            "ip_version",
+            "port",
+            "service",
+            "status",
+            "status_text",
+            "latency_ms",
+            "banner",
+            "error",
+            "checked_at",
+        ]
+        with open(path, "w", newline="", encoding="utf-8-sig") as file:
+            writer = csv.DictWriter(file, fieldnames=fields)
+            writer.writeheader()
+            for row in self.last_results:
+                writer.writerow({field_name: row.get(field_name, "") for field_name in fields})
+
+    def open_ports_summary(self) -> str:
+        open_items = [item for item in self.last_results if item.get("status") == "open"]
+        if not open_items:
+            return ""
+        grouped: dict[str, list[str]] = {}
+        for item in sorted(open_items, key=result_sort_key):
+            grouped.setdefault(item["host"], []).append(str(item["port"]))
+        return "\n".join(f"{host}: {', '.join(ports)}" for host, ports in grouped.items())
+
+    def describe_options(self, options: ScanOptions) -> str:
+        closed = "显示" if options.show_closed else "只显示开放端口"
+        banner = "开启" if options.banner_probe else "关闭"
+        return f"超时: {options.timeout_ms}ms  并发: {options.workers}  输出: {closed}  Banner 探测: {banner}\n\n"
+
+    def normalize_options(self, options: Optional[dict]) -> ScanOptions:
+        options = options or {}
+        return ScanOptions(
+            timeout_ms=clamp_int(options.get("timeout_ms", 800), 100, 60000, "超时"),
+            workers=clamp_int(options.get("workers", 128), 1, 512, "并发数"),
+            show_closed=bool(options.get("show_closed", False)),
+            banner_probe=bool(options.get("banner_probe", False)),
+        )
+
+    def _write_summary(self, title: str, stats: ScanStats, state: str) -> None:
+        snapshot = stats.snapshot(state)
+        self.output(f"\n==== {title}统计 ====\n", "muted")
+        self.output(
+            f"状态: {state}  已扫: {snapshot['scanned']}/{snapshot['total']}  "
+            f"开放: {snapshot['open']}  关闭: {snapshot['closed']}  超时: {snapshot['timeout']}  "
+            f"不可达: {snapshot['unreachable']}  错误: {snapshot['error'] + snapshot['dns_error']}  "
+            f"耗时: {snapshot['elapsed']:.1f}s\n",
+            "success" if snapshot["open"] else "warning",
+        )
+        summary = self.open_ports_summary()
+        if summary:
+            self.output("开放端口汇总:\n" + summary + "\n", "success")
+
     def is_scanning(self) -> bool:
-        return bool(self._scan_thread and self._scan_thread.is_alive())
+        return bool(self.scan_thread and self.scan_thread.is_alive())
+
+
+def normalize_ports(ports: Iterable[int]) -> list[int]:
+    unique = sorted({validate_port(port) for port in ports})
+    if not unique:
+        raise ValueError("请输入至少一个端口")
+    return unique
+
+
+def parse_scan_hosts(text: str) -> list[str]:
+    raw = text.strip()
+    if not raw:
+        raise ValueError("请输入扫描目标")
+
+    targets = []
+    for part in re.split(r"[,，;\s]+", raw):
+        item = part.strip()
+        if not item:
+            continue
+        if "/" in item:
+            network = ipaddress.ip_network(item, strict=False)
+            targets.extend(str(ip) for ip in network.hosts())
+        elif re.match(r"^\d{1,3}(?:\.\d{1,3}){3}-\d{1,3}$", item):
+            prefix, tail = item.rsplit(".", 1)
+            start_text, end_text = tail.split("-", 1)
+            start = int(start_text)
+            end = int(end_text)
+            if start > end:
+                raise ValueError("IP 范围起始值不能大于结束值")
+            targets.extend(str(ipaddress.ip_address(f"{prefix}.{value}")) for value in range(start, end + 1))
+        elif re.match(r"^\d{1,3}(?:\.\d{1,3}){3}-\d{1,3}(?:\.\d{1,3}){3}$", item):
+            start_text, end_text = item.split("-", 1)
+            start_ip = ipaddress.ip_address(start_text)
+            end_ip = ipaddress.ip_address(end_text)
+            if start_ip.version != end_ip.version:
+                raise ValueError("IP 范围两端必须是同一 IP 版本")
+            if int(start_ip) > int(end_ip):
+                raise ValueError("IP 范围起始值不能大于结束值")
+            targets.extend(str(ipaddress.ip_address(value)) for value in range(int(start_ip), int(end_ip) + 1))
+        else:
+            targets.append(validate_host(item))
+
+    unique = list(dict.fromkeys(targets))
+    if not unique:
+        raise ValueError("没有解析到有效目标")
+    return unique
+
+
+def resolve_host(host: str) -> dict:
+    try:
+        parsed = ipaddress.ip_address(host)
+        return {"ok": True, "host": host, "resolved_ip": str(parsed), "ip_version": f"IPv{parsed.version}", "error": ""}
+    except ValueError:
+        pass
+
+    try:
+        infos = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+    except socket.gaierror as exc:
+        return {"ok": False, "host": host, "resolved_ip": "", "ip_version": "", "error": clean_error(exc)}
+
+    addresses = []
+    for family, _socktype, _proto, _canonname, sockaddr in infos:
+        if family not in (socket.AF_INET, socket.AF_INET6):
+            continue
+        ip = sockaddr[0]
+        if ip not in addresses:
+            addresses.append(ip)
+
+    if not addresses:
+        return {"ok": False, "host": host, "resolved_ip": "", "ip_version": "", "error": "没有可用的 TCP 地址"}
+
+    selected = addresses[0]
+    version = "IPv6" if ":" in selected else "IPv4"
+    return {"ok": True, "host": host, "resolved_ip": selected, "ip_version": version, "error": ""}
+
+
+def service_name(port: int) -> str:
+    if port <= 0:
+        return ""
+    if port in COMMON_SERVICES:
+        return COMMON_SERVICES[port]
+    try:
+        return socket.getservbyport(port, "tcp").upper()
+    except OSError:
+        return ""
+
+
+def classify_os_error(exc: OSError) -> str:
+    code = getattr(exc, "winerror", None) or getattr(exc, "errno", None)
+    text = str(exc).lower()
+    if code in {10061, 111, 61} or "refused" in text or "拒绝" in text:
+        return "closed"
+    if code in {10051, 10064, 10065, 101, 113} or "unreachable" in text or "不可达" in text:
+        return "unreachable"
+    if "timed out" in text or "超时" in text:
+        return "timeout"
+    return "error"
+
+
+def clean_error(exc: BaseException) -> str:
+    if isinstance(exc, OSError):
+        return exc.strerror or str(exc)
+    return str(exc)
+
+
+def result_sort_key(item: dict) -> tuple:
+    host_key = item.get("resolved_ip") or item.get("host") or ""
+    try:
+        host_key = f"{int(ipaddress.ip_address(host_key)):039d}"
+    except ValueError:
+        pass
+    return (host_key, int(item.get("port") or 0))
+
+
+def clamp_int(value, min_value: int, max_value: int, label: str) -> int:
+    try:
+        number = int(str(value).strip())
+    except ValueError as exc:
+        raise ValueError(f"{label}必须是整数") from exc
+    if number < min_value or number > max_value:
+        raise ValueError(f"{label}必须在 {min_value}-{max_value} 之间")
+    return number

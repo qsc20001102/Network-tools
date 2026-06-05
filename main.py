@@ -1,21 +1,25 @@
-import sys
 import os
+import sys
 import tkinter as tk
 
 from core.logger_config import setup_logger
 from core.ui.ui_main import MainUI
 
-if __name__ == "__main__":
-    # 进行日志配置
+
+def get_base_dir() -> str:
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+def main() -> None:
     setup_logger()
-    # 判断是否是打包后的环境
-    if getattr(sys, 'frozen', False):
-        # 打包后的路径（exe所在的目录）
-        base_dir = os.path.dirname(sys.executable)
-    else:
-        # 普通Python运行时
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-    # 启动主界面
+
     root = tk.Tk()
-    app = MainUI(root)
+    root.minsize(960, 600)
+    MainUI(root, base_dir=get_base_dir())
     root.mainloop()
+
+
+if __name__ == "__main__":
+    main()

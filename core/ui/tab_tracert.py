@@ -1,56 +1,50 @@
-import tkinter as tk
-from tkinter import ttk, filedialog, messagebox, scrolledtext
+from tkinter import messagebox
 
-from core.ui.basic_ui import BasicUI
-from core.Function.tracert_fun import TracertFun    
+from core.Function.tracert_fun import TracertFun
+from core.ui.components import Console, Page, action_bar, button, field
 
-import logging
-logger = logging.getLogger(__name__)
 
-class TracertTab(ttk.Frame, BasicUI):
+class TracertTab(Page):
     def __init__(self, parent):
-        super().__init__(parent)   
-        self.tracert_ui()
-        self.tracert_fun = TracertFun(self.result_box)
+        super().__init__(parent, "路由追踪", "查看从本机到目标地址的网络跳点和响应时间。")
+        self.body.rowconfigure(1, weight=1)
 
-    def tracert_ui(self):
-        """tracert界面布局"""
-        self.create_targetadd_section()
+        target = self.section("追踪参数", 0, columns=4)
+        self.target = field(target, "目标 IP / 域名", 1, 0, "8.8.8.8", 28)
+        self.max_hops = field(target, "最大跳数", 1, 1, "20", 12)
+        self.timeout_ms = field(target, "单跳超时（ms）", 1, 2, "800", 14)
+        actions = action_bar(target, 2, 4)
+        self.start_btn = button(actions, "↗ 开始追踪", self.start_trace, "Primary.TButton")
+        self.stop_btn = button(actions, "■ 停止", self.stop_trace, "Danger.TButton")
 
-        self.create_output_section()
-# --------------------------------------UI界面布局函数--------------------------------------
-    def create_targetadd_section(self):
-        # 区域标签
-        frame = ttk.LabelFrame(self, text="追踪目标地址")
-        frame.pack(side='top', fill='x', padx=10, pady=5)
+        output = self.section("输出控制台", 1, columns=1)
+        output.rowconfigure(1, weight=1)
+        output.columnconfigure(0, weight=1)
+        self.console = Console(output, height=22)
+        self.console.grid(row=1, column=0, sticky="nsew", padx=18, pady=(0, 18))
 
-        self.entry_tracert_add = self.add_input(frame, "目标地址", row=0, col=0, entry_width=40, inivar="202.89.233.100") 
-        self.but_tracert_start = self.add_button(frame, "开始追踪", row=0, col=1, width=8, command=self.tracert_start_callback)
-        self.but_tracert_stop = self.add_button(frame, "停止追踪", row=0, col=2, width=8, command=self.tracert_stop_callback)
+        self.tracert_fun = TracertFun(self.write, self.on_task_done)
 
-    def create_output_section(self):
-        # 区域标签
-        frame = ttk.LabelFrame(self, text="结果输出")
-        frame.pack(side='top', fill='x', padx=10, pady=5)
+    def write(self, text, tag=None):
+        self.console.write(text, tag)
 
-        self.result_box = scrolledtext.ScrolledText(frame, width=100, height=25)
-        self.result_box.pack(pady=10)
-# --------------------------------------按钮回调函数--------------------------------------
-    def tracert_start_callback(self):
-        """开始追踪按钮回调"""
-        target = self.entry_tracert_add['var'].get()
-        if not target:
-            messagebox.showwarning("输入错误", "请输入目标地址！")
-            return
-        self.tracert_fun.start_tracert(target)
+    def start_trace(self):
+        try:
+            self.console.clear()
+            self.tracert_fun.start_tracert(
+                self.target["var"].get(),
+                int(self.max_hops["var"].get()),
+                int(self.timeout_ms["var"].get()),
+            )
+            self.start_btn.configure(state="disabled")
+        except Exception as exc:
+            messagebox.showwarning("无法开始路由追踪", str(exc))
 
-    def tracert_stop_callback(self):
-        """停止追踪按钮回调"""
-        self.tracert_fun.stop_tracert()
+    def stop_trace(self):
+        try:
+            self.tracert_fun.stop_tracert()
+        except Exception as exc:
+            messagebox.showinfo("提示", str(exc))
 
-
-
-
-
-   
-        
+    def on_task_done(self):
+        self.after(0, lambda: self.start_btn.configure(state="normal"))

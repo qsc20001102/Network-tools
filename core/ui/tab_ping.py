@@ -1,122 +1,234 @@
+import re
+import threading
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox, scrolledtext
+from tkinter import filedialog, messagebox, ttk
 
-from core.ui.basic_ui import BasicUI
+from core.Function.network_fun import NetworkManager
 from core.Function.ping_fun import PingFun
+from core.ui.components import Console, Page, action_bar, button, combo, field
 
-import logging
-logger = logging.getLogger(__name__)
 
-class PingTab(ttk.Frame, BasicUI):
+DEFAULT_SOURCE = "默认路由"
+IP_PATTERN = re.compile(r"(?<!\d)(?:\d{1,3}\.){3}\d{1,3}(?!\d)")
+
+
+class PingTab(Page):
     def __init__(self, parent):
-        super().__init__(parent)   
-        self.ping_ui()
-        self.ping_fun = PingFun(self.result_box)
+        super().__init__(parent, "Ping 探测", "单点 Ping、批量探活、参数化诊断与结果导出。")
+        self.body.rowconfigure(2, weight=1)
 
-    def ping_ui(self):
-        """ping界面布局"""
-        self.create_assignIP_section()
-        self.create_batchIP_section()
-        self.create_outputping_section()
-# --------------------------------------UI界面布局函数--------------------------------------
-    def create_assignIP_section(self):
-        # 区域标签
-        frame = ttk.LabelFrame(self, text="指定地址 Ping 目标地址")
-        frame.pack(side='top', fill='x', padx=10, pady=5)
+        status = self.section("实时状态", 0, columns=7)
+        self.state = field(status, "状态", 1, 0, "等待", 12)
+        self.sent = field(status, "发送", 1, 1, "0", 8)
+        self.received = field(status, "接收", 1, 2, "0", 8)
+        self.loss = field(status, "丢包率", 1, 3, "0.0%", 10)
+        self.avg = field(status, "平均延迟", 1, 4, "0.0 ms", 12)
+        self.jitter = field(status, "抖动", 1, 5, "0.0 ms", 12)
+        self.quality = field(status, "质量", 1, 6, "等待", 10)
+        for item in (self.state, self.sent, self.received, self.loss, self.avg, self.jitter, self.quality):
+            item["entry"].configure(state="disabled")
 
-        self.entry_assignIP_A = self.add_input(frame, "本地IP", row=0, col=0) 
-        self.entry_assignIP_B = self.add_input(frame, "目标IP", row=0, col=1, inivar="127.0.0.1") 
-        self.assignIP_startPing = self.add_button(frame, "开始", row=0, col=2, command=self.btn_assignIP_startPing)
-        self.assignIP_stopPing = self.add_button(frame, "停止", row=0, col=3, command=self.btn_assignIP_stopPing)
+        modes = self.section("探测模式", 1, columns=1)
+        self.tabs = ttk.Notebook(modes)
+        self.tabs.grid(row=1, column=0, sticky="ew", padx=18, pady=(0, 18))
+        self.single_tab = ttk.Frame(self.tabs, style="Panel.TFrame")
+        self.batch_tab = ttk.Frame(self.tabs, style="Panel.TFrame")
+        self.tabs.add(self.single_tab, text="单点探测")
+        self.tabs.add(self.batch_tab, text="批量探活")
+        self.build_single_tab()
+        self.build_batch_tab()
 
-    def create_batchIP_section(self):
-        # 区域标签
-        frame = ttk.LabelFrame(self, text="指定地址 Ping 批量地址")
-        frame.pack(side='top', fill='x', padx=10, pady=5)
+        output = self.section("输出控制台", 2, columns=1)
+        output.rowconfigure(1, weight=1)
+        output.columnconfigure(0, weight=1)
+        self.console = Console(output, height=16)
+        self.console.grid(row=1, column=0, sticky="nsew", padx=18, pady=(0, 18))
 
-        self.entry_batchIP_A = self.add_input(frame, "本地IP", row=0, col=0) 
-        self.entry_batchIP_B = self.add_input(frame, "C类网段", row=0, col=1, inivar="192.168.1.", entry_width=15) 
-        self.entry_batchIP_B_begin = self.add_input(frame, "起始地址", row=0, col=2, inivar="1", entry_width=5) 
-        self.entry_batchIP_B_end = self.add_input(frame, "结束地址", row=0, col=3, inivar="255", entry_width=5) 
-        self.batchIP_startPing = self.add_button(frame, "开始", row=0, col=4, command=self.btn_batchIP_startPing)
-        self.batchIP_stopPing = self.add_button(frame, "停止", row=0, col=5, command=self.btn_batchIP_stopPing)
+        self.ping_fun = PingFun(self.write, self.on_task_done, self.update_status)
+        self.source_loader = NetworkManager(lambda _text, _tag=None: None)
+        self.after(350, self.load_source_ips)
 
-    def create_outputping_section(self):
-        # 区域标签
-        frame = ttk.LabelFrame(self, text="PING 结果输出")
-        frame.pack(side='top', fill='x', padx=10, pady=5)
+    def build_single_tab(self):
+        for col in range(6):
+            self.single_tab.columnconfigure(col, weight=1)
 
-        self.result_box = scrolledtext.ScrolledText(frame, width=100, height=20)
-        self.result_box.pack(pady=10)
-# --------------------------------------按钮回调函数--------------------------------------
-    def btn_assignIP_startPing(self):         
-        if not self.entry_assignIP_B['var'].get():
-            messagebox.showwarning("输入错误", "请输入目标IP或域名！")
-            return   
-        logger.info(f"开始由{self.entry_assignIP_A['var'].get()} Ping {self.entry_assignIP_B['var'].get()}")
-        self.ping_fun.strat_ping(self.entry_assignIP_B['var'].get(),local_ip=self.entry_assignIP_A['var'].get(), 
-                                 callback=self.assignIP_ping_callback)
-        self.assignIP_startPing['btn'].config(state='disabled')
+        self.local_ip = combo(self.single_tab, "本地源 IP", 0, 0, [], "", 22)
+        self.target = field(self.single_tab, "目标 IP / 域名", 0, 1, "127.0.0.1", 28)
+        self.single_mode = combo(self.single_tab, "模式", 0, 2, ["持续", "指定次数"], "持续", 12)
+        self.count = field(self.single_tab, "次数", 0, 3, "4", 8)
+        self.interval = field(self.single_tab, "间隔 ms", 0, 4, "1000", 10)
+        self.timeout = field(self.single_tab, "超时 ms", 0, 5, "1200", 10)
 
-    def btn_assignIP_stopPing(self):   
-        logger.info(f"停止由{self.entry_assignIP_A['var'].get()} Ping {self.entry_assignIP_B['var'].get()}")
+        self.size = field(self.single_tab, "包大小 bytes", 1, 0, "32", 12)
+        self.ttl = field(self.single_tab, "TTL（0=默认）", 1, 1, "0", 12)
+        self.df_var = tk.BooleanVar(value=False)
+        df_frame = ttk.Frame(self.single_tab, style="Panel.TFrame")
+        df_frame.grid(row=1, column=2, sticky="ew", padx=18, pady=(22, 14))
+        ttk.Checkbutton(df_frame, text="禁止分片", variable=self.df_var).pack(anchor="w")
+
+        actions = action_bar(self.single_tab, 2, 6)
+        self.start_btn = button(actions, "开始 Ping", self.start_ping, "Primary.TButton")
+        self.stop_btn = button(actions, "停止", self.stop_ping, "Danger.TButton")
+        self.reload_sources_btn = button(actions, "刷新源 IP", self.load_source_ips, "Secondary.TButton")
+
+    def build_batch_tab(self):
+        for col in range(6):
+            self.batch_tab.columnconfigure(col, weight=1)
+
+        self.batch_local_ip = combo(self.batch_tab, "本地源 IP", 0, 0, [], "", 22)
+        self.targets = field(self.batch_tab, "目标范围 / 列表", 0, 1, "192.168.1.0/24", 42, colspan=2)
+        self.batch_timeout = field(self.batch_tab, "超时 ms", 0, 3, "1200", 10)
+        self.batch_size = field(self.batch_tab, "包大小 bytes", 0, 4, "32", 12)
+        self.workers = field(self.batch_tab, "并发数", 0, 5, "64", 10)
+
+        self.batch_ttl = field(self.batch_tab, "TTL（0=默认）", 1, 0, "0", 12)
+        self.batch_df_var = tk.BooleanVar(value=False)
+        df_frame = ttk.Frame(self.batch_tab, style="Panel.TFrame")
+        df_frame.grid(row=1, column=1, sticky="ew", padx=18, pady=(22, 14))
+        ttk.Checkbutton(df_frame, text="禁止分片", variable=self.batch_df_var).pack(anchor="w")
+
+        actions = action_bar(self.batch_tab, 2, 6)
+        self.batch_start_btn = button(actions, "批量 Ping", self.start_batch_ping, "Primary.TButton")
+        self.batch_stop_btn = button(actions, "停止批量", self.stop_batch_ping, "Danger.TButton")
+        self.import_btn = button(actions, "导入目标", self.import_targets, "Secondary.TButton")
+        self.export_btn = button(actions, "导出 CSV", self.export_results, "Secondary.TButton")
+        self.reload_batch_sources_btn = button(actions, "刷新源 IP", self.load_source_ips, "Secondary.TButton")
+
+    def write(self, text, tag=None):
+        self.console.write(text, tag)
+
+    def clear(self):
+        self.console.clear()
+        self.update_status({"state": "等待", "sent": 0, "received": 0, "lost": 0, "loss_rate": 0, "avg_rtt": 0, "jitter": 0, "quality": "等待"})
+
+    def start_ping(self):
+        try:
+            self.clear()
+            self.ping_fun.start_ping(self.target["var"].get(), self.selected_source_ip(self.local_ip), self.single_options())
+            self._set_start_buttons("disabled")
+        except Exception as exc:
+            messagebox.showwarning("无法开始 Ping", str(exc))
+
+    def stop_ping(self):
         self.ping_fun.stop_ping()
-        self.assignIP_startPing['btn'].config(state='normal')
 
-    def assignIP_ping_callback(self):
-        self.assignIP_startPing['btn'].config(state='normal')
+    def start_batch_ping(self):
+        try:
+            self.clear()
+            self.ping_fun.start_batch_ping(self.targets["var"].get(), self.selected_source_ip(self.batch_local_ip), self.batch_options())
+            self._set_start_buttons("disabled")
+        except Exception as exc:
+            messagebox.showwarning("无法开始批量 Ping", str(exc))
 
-    def btn_batchIP_startPing(self):
-        net_prefix = self.entry_batchIP_B['var'].get()
-        start = self.entry_batchIP_B_begin['var'].get()
-        end = self.entry_batchIP_B_end['var'].get()
-        local_ip = self.entry_batchIP_A['var'].get()
-        # ========= 输入参数检查 =========
-        if not net_prefix or start is None or end is None:
-            messagebox.showwarning("输入错误", "请输入完整的网段、起始地址和结束地址！")
+    def stop_batch_ping(self):
+        self.ping_fun.stop_batch_ping()
+
+    def single_options(self):
+        return {
+            "mode": self.single_mode["var"].get(),
+            "count": self.count["var"].get(),
+            "interval_ms": self.interval["var"].get(),
+            "timeout_ms": self.timeout["var"].get(),
+            "size": self.size["var"].get(),
+            "ttl": self.ttl["var"].get(),
+            "dont_fragment": self.df_var.get(),
+        }
+
+    def batch_options(self):
+        return {
+            "mode": "指定次数",
+            "count": 1,
+            "interval_ms": 1000,
+            "timeout_ms": self.batch_timeout["var"].get(),
+            "size": self.batch_size["var"].get(),
+            "ttl": self.batch_ttl["var"].get(),
+            "dont_fragment": self.batch_df_var.get(),
+            "workers": self.workers["var"].get(),
+        }
+
+    def update_status(self, stats):
+        def apply():
+            values = [
+                (self.state, stats.get("state", "等待")),
+                (self.sent, str(stats.get("sent", 0))),
+                (self.received, str(stats.get("received", 0))),
+                (self.loss, f"{stats.get('loss_rate', 0):.1f}%"),
+                (self.avg, f"{stats.get('avg_rtt', 0):.1f} ms"),
+                (self.jitter, f"{stats.get('jitter', 0):.1f} ms"),
+                (self.quality, stats.get("quality", "等待")),
+            ]
+            for item, value in values:
+                item["entry"].configure(state="normal")
+                item["var"].set(value)
+                item["entry"].configure(state="disabled")
+
+        self.after(0, apply)
+
+    def load_source_ips(self):
+        def worker():
+            values = [DEFAULT_SOURCE]
+            try:
+                for adapter in self.source_loader.get_network_info():
+                    ip = adapter.get("ipv4", "")
+                    if ip:
+                        name = adapter.get("name", "").strip()
+                        values.append(f"{name} - {ip}" if name else ip)
+            except Exception as exc:
+                self.write(f"读取本地源 IP 失败: {exc}\n", "warning")
+            self.after(0, lambda: self.apply_source_ips(values))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def apply_source_ips(self, values):
+        values = list(dict.fromkeys(values))
+        self.local_ip["combobox"]["values"] = values
+        self.batch_local_ip["combobox"]["values"] = values
+        if self.local_ip["var"].get() not in values:
+            self.local_ip["var"].set(values[0])
+        if self.batch_local_ip["var"].get() not in values:
+            self.batch_local_ip["var"].set(values[0])
+
+    def selected_source_ip(self, item):
+        value = item["var"].get().strip()
+        if not value or value == DEFAULT_SOURCE:
+            return ""
+        match = IP_PATTERN.search(value)
+        return match.group(0) if match else value
+
+    def import_targets(self):
+        path = filedialog.askopenfilename(
+            title="导入 Ping 目标",
+            filetypes=[("文本文件", "*.txt *.csv"), ("所有文件", "*.*")],
+        )
+        if not path:
             return
         try:
-            start = int(start)
-            end = int(end)
-        except ValueError:
-            messagebox.showwarning("输入错误", "起始地址和结束地址必须是整数！")
+            with open(path, "r", encoding="utf-8-sig") as file:
+                items = []
+                for line in file:
+                    items.extend(part.strip() for part in line.replace("，", ",").split(",") if part.strip())
+            self.targets["var"].set(",".join(items))
+            self.write(f"已导入 {len(items)} 个目标/表达式\n", "success")
+        except Exception as exc:
+            messagebox.showwarning("导入失败", str(exc))
+
+    def export_results(self):
+        path = filedialog.asksaveasfilename(
+            title="导出批量 Ping 结果",
+            defaultextension=".csv",
+            filetypes=[("CSV 文件", "*.csv")],
+        )
+        if not path:
             return
-        if start < 1 or end > 255:
-            messagebox.showwarning("输入错误", "起始地址最小为1，结束地址最大为255！")
-            return
-        if start > end:
-            messagebox.showwarning("输入错误", "起始地址不能大于结束地址！")
-            return
-        if not net_prefix.endswith('.'):
-            messagebox.showwarning("输入错误", "网段必须以 '.' 结尾，例如：192.168.1.")
-            return
-        if local_ip == "":
-            logger.info(f"开始批量 Ping {net_prefix}{start} - {net_prefix}{end}")
-        else:
-            logger.info(f"开始由{local_ip} 批量 Ping {net_prefix}{start} - {net_prefix}{end}")
-        
-        self.ping_fun.start_batch_ping(net_prefix, start, end, local_ip=local_ip, callback=self.batchIP_ping_callback)
-        self.batchIP_startPing['btn'].config(state='disabled')
+        try:
+            self.ping_fun.export_batch_results(path)
+            self.write(f"已导出结果: {path}\n", "success")
+        except Exception as exc:
+            messagebox.showwarning("导出失败", str(exc))
 
-    def btn_batchIP_stopPing(self):   
-        net_prefix = self.entry_batchIP_B['var'].get()
-        start = self.entry_batchIP_B_begin['var'].get()
-        end = self.entry_batchIP_B_end['var'].get()
-        local_ip = self.entry_batchIP_A['var'].get()
-        if local_ip == "":
-            logger.info(f"停止批量 Ping {net_prefix}{start} - {net_prefix}{end}")
-        else:
-            logger.info(f"停止由{local_ip} 批量 Ping {net_prefix}{start} - {net_prefix}{end}")
-        self.ping_fun.stop_batch_ping()
-        self.batchIP_startPing['btn'].config(state='normal')
+    def on_task_done(self):
+        self.after(0, lambda: self._set_start_buttons("normal"))
 
-    def batchIP_ping_callback(self):
-        self.batchIP_startPing['btn'].config(state='normal')
-
-
-
-
-
-
-   
-        
+    def _set_start_buttons(self, state):
+        self.start_btn.configure(state=state)
+        self.batch_start_btn.configure(state=state)
