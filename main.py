@@ -2,7 +2,6 @@ import os
 import sys
 import tkinter as tk
 
-from core.logger_config import setup_logger
 from core.ui.ui_main import MainUI
 
 
@@ -13,8 +12,6 @@ def get_base_dir() -> str:
 
 
 def main() -> None:
-    setup_logger()
-
     root = tk.Tk()
     root.minsize(960, 600)
     MainUI(root, base_dir=get_base_dir())

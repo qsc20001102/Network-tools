@@ -1,6 +1,8 @@
 import tkinter as tk
 from tkinter import ttk
 
+from core.ui.tab_ip_conflict import IpConflictTab
+from core.ui.tab_loop import LoopTab
 from core.ui.tab_network import NetworkTab
 from core.ui.tab_ping import PingTab
 from core.ui.tab_telnet import TelnetTab
@@ -62,6 +64,8 @@ class MainUI:
             ("ping", "⌁", "Ping 探测", "单点与批量探活"),
             ("ports", "⌕", "端口扫描", "TCP 连通性检测"),
             ("trace", "↗", "路由追踪", "跳点路径分析"),
+            ("loop", "◇", "环网检测", "二层环路风险"),
+            ("ip_conflict", "≠", "IP 冲突", "地址占用排查"),
         ]
         for key, icon, title, subtitle in items:
             self.nav_buttons[key] = self._nav_button(key, icon, title, subtitle)
@@ -103,6 +107,8 @@ class MainUI:
             "ping": PingTab(self.content),
             "ports": TelnetTab(self.content),
             "trace": TracertTab(self.content),
+            "loop": LoopTab(self.content),
+            "ip_conflict": IpConflictTab(self.content),
         }
         for page in self.pages.values():
             page.grid(row=0, column=0, sticky="nsew")
