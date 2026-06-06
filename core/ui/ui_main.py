@@ -1,6 +1,8 @@
 import tkinter as tk
 from tkinter import ttk
 
+from core.ui.tab_device_discovery import DeviceDiscoveryTab
+from core.ui.tab_dns import DnsTab
 from core.ui.tab_ip_conflict import IpConflictTab
 from core.ui.tab_loop import LoopTab
 from core.ui.tab_network import NetworkTab
@@ -61,6 +63,8 @@ class MainUI:
 
         items = [
             ("network", "◎", "网卡配置", "IP / DNS / DHCP"),
+            ("dns", "◇", "DNS 诊断", "解析与服务器对比"),
+            ("devices", "▦", "设备发现", "局域网资产"),
             ("ping", "⌁", "Ping 探测", "单点与批量探活"),
             ("ports", "⌕", "端口扫描", "TCP 连通性检测"),
             ("trace", "↗", "路由追踪", "跳点路径分析"),
@@ -104,11 +108,13 @@ class MainUI:
     def _build_pages(self) -> None:
         self.pages = {
             "network": NetworkTab(self.content),
+            "dns": DnsTab(self.content),
             "ping": PingTab(self.content),
             "ports": TelnetTab(self.content),
             "trace": TracertTab(self.content),
             "loop": LoopTab(self.content),
             "ip_conflict": IpConflictTab(self.content),
+            "devices": DeviceDiscoveryTab(self.content),
         }
         for page in self.pages.values():
             page.grid(row=0, column=0, sticky="nsew")

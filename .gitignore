@@ -24,6 +24,13 @@ dist/
 *.spec
 *.manifest
 
+# Packaged binaries and release archives
+*.exe
+*.msi
+*.7z
+*.rar
+*.zip
+
 # Local runtime data
 network_profiles.json
 *.db
