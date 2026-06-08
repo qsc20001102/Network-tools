@@ -3,13 +3,14 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 from core.Function.dns_diag_fun import ALL_ADAPTERS, DEFAULT_DOMAINS, DEFAULT_RECORD_TYPES, DnsDiagnostic
-from core.ui.components import Console, Page, action_bar, button, combo, field
+from core.ui.components import Page, action_bar, button, combo, field
 
 
 class DnsTab(Page):
-    def __init__(self, parent):
+    def __init__(self, parent, console):
         super().__init__(parent, "DNS 诊断", "对比本机 DNS 与常用 DNS 的解析结果、耗时和失败原因。")
-        self.body.rowconfigure(3, weight=1)
+        self.console = console
+        self.body.rowconfigure(2, weight=1)
 
         status = self.section("实时状态", 0, columns=6)
         self.state = field(status, "状态", 1, 0, "等待", 10)
@@ -33,6 +34,7 @@ class DnsTab(Page):
         self.stop_btn = button(actions, "停止", self.stop_diagnosis, "Danger.TButton")
         self.refresh_btn = button(actions, "刷新网卡", self.load_adapters, "Secondary.TButton")
         self.auto_dns_btn = button(actions, "自动 DNS", self.fill_default_dns, "Secondary.TButton")
+        self.repair_btn = button(actions, "修复异常", self.repair_dns, "Secondary.TButton")
         self.copy_btn = button(actions, "复制摘要", self.copy_summary, "Secondary.TButton")
         self.export_btn = button(actions, "导出 CSV", self.export_results, "Secondary.TButton")
 
@@ -55,13 +57,13 @@ class DnsTab(Page):
             "verdict": "错误 / 判断",
         }
         widths = {
-            "domain": 160,
-            "type": 70,
-            "server": 130,
-            "status": 80,
-            "elapsed": 85,
-            "values": 300,
-            "verdict": 360,
+            "domain": 130,
+            "type": 56,
+            "server": 116,
+            "status": 64,
+            "elapsed": 76,
+            "values": 220,
+            "verdict": 260,
         }
         for column, title in headings.items():
             self.results_tree.heading(column, text=title)
@@ -72,13 +74,9 @@ class DnsTab(Page):
         self.results_tree.grid(row=1, column=0, sticky="nsew", padx=18, pady=(0, 18))
         result_scroll = ttk.Scrollbar(results, orient="vertical", command=self.results_tree.yview)
         result_scroll.grid(row=1, column=1, sticky="ns", pady=(0, 18))
-        self.results_tree.configure(yscrollcommand=result_scroll.set)
-
-        output = self.section("诊断控制台", 3, columns=1)
-        output.rowconfigure(1, weight=1)
-        output.columnconfigure(0, weight=1)
-        self.console = Console(output, height=12)
-        self.console.grid(row=1, column=0, sticky="nsew", padx=18, pady=(0, 18))
+        x_scroll = ttk.Scrollbar(results, orient="horizontal", command=self.results_tree.xview)
+        x_scroll.grid(row=2, column=0, sticky="ew", padx=18, pady=(0, 18))
+        self.results_tree.configure(yscrollcommand=result_scroll.set, xscrollcommand=x_scroll.set)
 
         self.diagnostic = DnsDiagnostic(self.write, self.on_task_done, self.update_status, self.add_result)
         self.after(350, self.load_adapters)
@@ -104,8 +102,7 @@ class DnsTab(Page):
     def load_adapters(self):
         def worker():
             try:
-                values = self.diagnostic.get_adapter_choices()
-                default_dns = self.diagnostic.default_dns_servers(values[1] if len(values) > 1 else ALL_ADAPTERS)
+                values, default_dns = self.diagnostic.get_adapter_choices_and_default_dns()
             except Exception as exc:
                 values = [ALL_ADAPTERS]
                 default_dns = ""
@@ -119,7 +116,7 @@ class DnsTab(Page):
         values = list(dict.fromkeys(values))
         self.adapter["combobox"]["values"] = values
         if self.adapter["var"].get() not in values:
-            self.adapter["var"].set(values[1] if len(values) > 1 else values[0])
+            self.adapter["var"].set(ALL_ADAPTERS)
         if not self.dns_servers["var"].get() and default_dns:
             self.dns_servers["var"].set(default_dns)
 
@@ -138,9 +135,11 @@ class DnsTab(Page):
         try:
             self.clear()
             self.start_btn.configure(state="disabled")
+            self.repair_btn.configure(state="disabled")
             self.diagnostic.start_diagnosis(self.adapter["var"].get(), self.options())
         except Exception as exc:
             self.start_btn.configure(state="normal")
+            self.repair_btn.configure(state="normal")
             messagebox.showwarning("无法开始 DNS 诊断", str(exc))
 
     def stop_diagnosis(self):
@@ -171,6 +170,42 @@ class DnsTab(Page):
             self.write(f"已导出结果: {path}\n", "success")
         except Exception as exc:
             messagebox.showwarning("导出失败", str(exc))
+
+    def repair_dns(self):
+        adapter = self.adapter["var"].get() or ALL_ADAPTERS
+        if not messagebox.askyesno(
+            "确认修复 DNS",
+            f"将把“{adapter}”的 DNS 设置为 223.5.5.5 和 114.114.114.114，并刷新 DNS 缓存。\n\n此操作需要管理员权限，确定继续吗？",
+        ):
+            return
+
+        self.repair_btn.configure(state="disabled")
+        self.start_btn.configure(state="disabled")
+        self.write("\n开始修复 DNS 异常...\n", "warning")
+
+        def worker():
+            try:
+                result = self.diagnostic.repair_abnormal_dns(adapter)
+                self.after(0, lambda: self.on_repair_success(result))
+            except Exception as exc:
+                self.after(0, lambda: self.on_repair_failed(exc))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def on_repair_success(self, result):
+        names = "、".join(result.get("adapters", []))
+        servers = ",".join(result.get("servers", []))
+        self.write(f"DNS 修复完成: {names} -> {servers}\n", "success")
+        self.dns_servers["var"].set(servers)
+        self.load_adapters()
+        self.start_btn.configure(state="normal")
+        self.repair_btn.configure(state="normal")
+
+    def on_repair_failed(self, exc):
+        self.write(f"DNS 修复失败: {exc}\n", "error")
+        self.start_btn.configure(state="normal")
+        self.repair_btn.configure(state="normal")
+        messagebox.showerror("DNS 修复失败", f"{exc}\n\n请确认程序已用管理员权限运行。")
 
     def copy_summary(self):
         text = self.diagnostic.copy_summary()
@@ -226,4 +261,4 @@ class DnsTab(Page):
         self.after(0, apply)
 
     def on_task_done(self):
-        self.after(0, lambda: self.start_btn.configure(state="normal"))
+        self.after(0, lambda: (self.start_btn.configure(state="normal"), self.repair_btn.configure(state="normal")))

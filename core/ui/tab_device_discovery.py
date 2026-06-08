@@ -3,13 +3,14 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 from core.Function.device_discovery_fun import ALL_ADAPTERS, DeviceDiscovery
-from core.ui.components import Console, Page, action_bar, button, combo, field
+from core.ui.components import Page, action_bar, button, combo, field
 
 
 class DeviceDiscoveryTab(Page):
-    def __init__(self, parent):
-        super().__init__(parent, "设备发现", "发现局域网在线与 ARP 可见设备，整理 IP、MAC、主机名、厂商与来源网卡。")
-        self.body.rowconfigure(3, weight=1)
+    def __init__(self, parent, console):
+        super().__init__(parent, "设备发现", "发现局域网在线与 ARP 可见设备，整理 IP、MAC、厂商与来源网卡。")
+        self.console = console
+        self.body.rowconfigure(2, weight=1)
 
         status = self.section("实时状态", 0, columns=6)
         self.state = field(status, "状态", 1, 0, "等待", 10)
@@ -23,31 +24,33 @@ class DeviceDiscoveryTab(Page):
 
         params = self.section("发现参数", 1, columns=6)
         self.adapter = combo(params, "检测网卡", 1, 0, [ALL_ADAPTERS], ALL_ADAPTERS, 22)
+        self.adapter["combobox"].bind("<<ComboboxSelected>>", lambda _event: self.fill_default_range(silent=True))
         self.scan_range = field(params, "扫描范围", 1, 1, "", 34, colspan=2)
-        self.workers = field(params, "并发数", 1, 3, "64", 10)
+        self.workers = field(params, "并发数", 1, 3, "24", 10)
         self.timeout = field(params, "超时 ms", 1, 4, "500", 10)
         self.max_hosts = field(params, "最大地址数", 1, 5, "254", 10)
-        actions = action_bar(params, 2, 6)
-        self.start_btn = button(actions, "开始发现", self.start_discovery, "Primary.TButton")
-        self.stop_btn = button(actions, "停止", self.stop_discovery, "Danger.TButton")
-        self.refresh_btn = button(actions, "刷新网卡", self.load_adapters, "Secondary.TButton")
-        self.auto_range_btn = button(actions, "自动范围", self.fill_default_range, "Secondary.TButton")
-        self.copy_btn = button(actions, "复制清单", self.copy_inventory, "Secondary.TButton")
-        self.export_btn = button(actions, "导出 CSV", self.export_results, "Secondary.TButton")
+        primary_actions = action_bar(params, 2, 6)
+        self.start_btn = button(primary_actions, "开始发现", self.start_discovery, "Primary.TButton")
+        self.stop_btn = button(primary_actions, "停止", self.stop_discovery, "Danger.TButton")
+        self.refresh_btn = button(primary_actions, "刷新网卡", self.load_adapters, "Secondary.TButton")
+        self.auto_range_btn = button(primary_actions, "自动范围", self.fill_default_range, "Secondary.TButton")
+        self.stop_btn.configure(state="disabled")
+        secondary_actions = action_bar(params, 3, 6)
+        self.copy_btn = button(secondary_actions, "复制清单", self.copy_inventory, "Secondary.TButton")
+        self.export_btn = button(secondary_actions, "导出CSV", self.export_results, "Secondary.TButton")
 
         results = self.section("发现结果", 2, columns=1)
         results.rowconfigure(1, weight=1)
         results.columnconfigure(0, weight=1)
         self.results_tree = ttk.Treeview(
             results,
-            columns=("ip", "mac", "hostname", "vendor", "adapter", "latency", "method", "note"),
+            columns=("ip", "mac", "vendor", "adapter", "latency", "method", "note"),
             show="headings",
             height=10,
         )
         headings = {
             "ip": "IP",
             "mac": "MAC",
-            "hostname": "主机名",
             "vendor": "厂商",
             "adapter": "来源网卡",
             "latency": "延迟",
@@ -55,14 +58,13 @@ class DeviceDiscoveryTab(Page):
             "note": "备注",
         }
         widths = {
-            "ip": 130,
-            "mac": 150,
-            "hostname": 180,
-            "vendor": 130,
+            "ip": 112,
+            "mac": 132,
+            "vendor": 120,
             "adapter": 150,
-            "latency": 85,
-            "method": 90,
-            "note": 130,
+            "latency": 72,
+            "method": 80,
+            "note": 140,
         }
         for column, title in headings.items():
             self.results_tree.heading(column, text=title)
@@ -73,13 +75,9 @@ class DeviceDiscoveryTab(Page):
         self.results_tree.grid(row=1, column=0, sticky="nsew", padx=18, pady=(0, 18))
         result_scroll = ttk.Scrollbar(results, orient="vertical", command=self.results_tree.yview)
         result_scroll.grid(row=1, column=1, sticky="ns", pady=(0, 18))
-        self.results_tree.configure(yscrollcommand=result_scroll.set)
-
-        output = self.section("发现控制台", 3, columns=1)
-        output.rowconfigure(1, weight=1)
-        output.columnconfigure(0, weight=1)
-        self.console = Console(output, height=12)
-        self.console.grid(row=1, column=0, sticky="nsew", padx=18, pady=(0, 18))
+        x_scroll = ttk.Scrollbar(results, orient="horizontal", command=self.results_tree.xview)
+        x_scroll.grid(row=2, column=0, sticky="ew", padx=18, pady=(0, 18))
+        self.results_tree.configure(yscrollcommand=result_scroll.set, xscrollcommand=x_scroll.set)
 
         self.discovery = DeviceDiscovery(self.write, self.on_task_done, self.update_status, self.add_result)
         self.after(350, self.load_adapters)
@@ -106,48 +104,58 @@ class DeviceDiscoveryTab(Page):
     def load_adapters(self):
         def worker():
             try:
-                values = self.discovery.get_adapter_choices()
-                default_range = self.discovery.default_scan_range(ALL_ADAPTERS)
+                values, default_range, default_adapter = self.discovery.get_adapter_choices_and_default_range()
             except Exception as exc:
                 values = [ALL_ADAPTERS]
                 default_range = ""
+                default_adapter = ""
                 self.write(f"读取网卡失败: {exc}\n", "warning")
-            self.after(0, lambda: self.apply_adapters(values, default_range))
+            self.after(0, lambda: self.apply_adapters(values, default_range, default_adapter))
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def apply_adapters(self, values, default_range):
+    def apply_adapters(self, values, default_range, default_adapter=""):
         values = values or [ALL_ADAPTERS]
         values = list(dict.fromkeys(values))
         self.adapter["combobox"]["values"] = values
-        if self.adapter["var"].get() not in values:
-            self.adapter["var"].set(values[1] if len(values) > 1 else values[0])
+        if self.adapter["var"].get() not in values or self.adapter["var"].get() == ALL_ADAPTERS:
+            self.adapter["var"].set(default_adapter if default_adapter in values else values[1] if len(values) > 1 else values[0])
         if not self.scan_range["var"].get() and default_range:
             self.scan_range["var"].set(default_range)
 
-    def fill_default_range(self):
+    def fill_default_range(self, silent=False):
         try:
             value = self.discovery.default_scan_range(self.adapter["var"].get())
             if not value:
-                messagebox.showinfo("提示", "未能根据当前网卡生成扫描范围")
+                if not silent:
+                    messagebox.showinfo("提示", "未能根据当前网卡生成扫描范围")
                 return
             self.scan_range["var"].set(value)
-            self.write(f"已生成安全扫描范围: {value}\n", "success")
+            if not silent:
+                self.write(f"已生成安全扫描范围: {value}\n", "success")
         except Exception as exc:
-            messagebox.showwarning("生成失败", str(exc))
+            if not silent:
+                messagebox.showwarning("生成失败", str(exc))
 
     def start_discovery(self):
         try:
             self.clear()
             self.start_btn.configure(state="disabled")
+            self.stop_btn.configure(state="normal")
+            self.refresh_btn.configure(state="disabled")
+            self.auto_range_btn.configure(state="disabled")
             self.discovery.start_discovery(self.adapter["var"].get(), self.options())
         except Exception as exc:
             self.start_btn.configure(state="normal")
+            self.stop_btn.configure(state="disabled")
+            self.refresh_btn.configure(state="normal")
+            self.auto_range_btn.configure(state="normal")
             messagebox.showwarning("无法开始设备发现", str(exc))
 
     def stop_discovery(self):
         try:
             self.discovery.stop_discovery()
+            self.stop_btn.configure(state="disabled")
         except Exception as exc:
             messagebox.showinfo("提示", str(exc))
 
@@ -217,7 +225,6 @@ class DeviceDiscoveryTab(Page):
                 values=(
                     row.get("ip", ""),
                     row.get("mac", ""),
-                    row.get("hostname", ""),
                     row.get("vendor", ""),
                     row.get("adapter", ""),
                     latency_text,
@@ -230,4 +237,12 @@ class DeviceDiscoveryTab(Page):
         self.after(0, apply)
 
     def on_task_done(self):
-        self.after(0, lambda: self.start_btn.configure(state="normal"))
+        self.after(
+            0,
+            lambda: (
+                self.start_btn.configure(state="normal"),
+                self.stop_btn.configure(state="disabled"),
+                self.refresh_btn.configure(state="normal"),
+                self.auto_range_btn.configure(state="normal"),
+            ),
+        )

@@ -24,33 +24,55 @@ class NetworkManager:
     def get_network_info(self) -> list[dict]:
         script = r"""
 $ErrorActionPreference = "SilentlyContinue"
-$items = Get-NetIPConfiguration | ForEach-Object {
-    $alias = $_.InterfaceAlias
-    $index = $_.InterfaceIndex
-    $adapter = Get-NetAdapter -InterfaceAlias $alias -ErrorAction SilentlyContinue
-    $ipif = Get-NetIPInterface -InterfaceAlias $alias -AddressFamily IPv4 -ErrorAction SilentlyContinue | Select-Object -First 1
-    $cim = Get-CimInstance Win32_NetworkAdapterConfiguration -Filter "IPEnabled=True" -ErrorAction SilentlyContinue | Where-Object { $_.InterfaceIndex -eq $index } | Select-Object -First 1
+$ipconfigs = @{}
+Get-NetIPConfiguration | ForEach-Object { $ipconfigs[[string]$_.InterfaceIndex] = $_ }
+
+$ipifs = @{}
+Get-NetIPInterface -AddressFamily IPv4 | ForEach-Object {
+    $key = [string]$_.InterfaceIndex
+    if (-not $ipifs.ContainsKey($key)) { $ipifs[$key] = $_ }
+}
+
+$cims = @{}
+Get-CimInstance Win32_NetworkAdapterConfiguration | ForEach-Object {
+    if ($_.InterfaceIndex -ne $null) { $cims[[string]$_.InterfaceIndex] = $_ }
+}
+
+$dnsMap = @{}
+Get-DnsClientServerAddress -AddressFamily IPv4 | ForEach-Object {
+    $dnsMap[[string]$_.InterfaceIndex] = @($_.ServerAddresses)
+}
+
+$items = Get-NetAdapter | Sort-Object Name | ForEach-Object {
+    $adapter = $_
+    $alias = $adapter.Name
+    $index = $adapter.ifIndex
+    $key = [string]$index
+    $ipconfig = $ipconfigs[$key]
+    $ipif = $ipifs[$key]
+    $cim = $cims[$key]
+    $dns = @($dnsMap[$key])
     [PSCustomObject]@{
         name = $alias
-        description = $_.InterfaceDescription
-        mac = if ($adapter) { $adapter.MacAddress } else { "" }
-        status = if ($adapter) { [string]$adapter.Status } else { "" }
-        link_speed = if ($adapter) { [string]$adapter.LinkSpeed } else { "" }
+        description = $adapter.InterfaceDescription
+        mac = $adapter.MacAddress
+        status = [string]$adapter.Status
+        link_speed = [string]$adapter.LinkSpeed
         interface_index = $index
-        ipv4 = @($_.IPv4Address | Select-Object -ExpandProperty IPAddress)[0]
-        ipv6 = @($_.IPv6Address | Select-Object -ExpandProperty IPAddress)
-        prefix_length = @($_.IPv4Address | Select-Object -ExpandProperty PrefixLength)[0]
-        gateway = @($_.IPv4DefaultGateway | Select-Object -ExpandProperty NextHop)[0]
-        dns = @($_.DNSServer.ServerAddresses)
+        ipv4 = @($ipconfig.IPv4Address | Select-Object -ExpandProperty IPAddress)[0]
+        ipv6 = @($ipconfig.IPv6Address | Select-Object -ExpandProperty IPAddress)
+        prefix_length = @($ipconfig.IPv4Address | Select-Object -ExpandProperty PrefixLength)[0]
+        gateway = @($ipconfig.IPv4DefaultGateway | Select-Object -ExpandProperty NextHop)[0]
+        dns = $dns
         dhcp_server = if ($cim) { $cim.DHCPServer } else { "" }
         dhcp_lease_obtained = if ($cim) { [string]$cim.DHCPLeaseObtained } else { "" }
         dhcp_lease_expires = if ($cim) { [string]$cim.DHCPLeaseExpires } else { "" }
-        dhcp_enabled = if ($ipif) { [string]$ipif.Dhcp -eq "Enabled" } else { $false }
+        dhcp_enabled = if ($ipif) { [string]$ipif.Dhcp -eq "Enabled" } elseif ($cim) { [bool]$cim.DHCPEnabled } else { $false }
     }
 }
 $items | ConvertTo-Json -Depth 5 -Compress
 """
-        result = run_hidden(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script], timeout=15)
+        result = run_hidden(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script], timeout=30)
         if result.returncode != 0:
             raise RuntimeError(result.stdout.strip() or "PowerShell 获取网卡信息失败")
 
@@ -60,6 +82,8 @@ $items | ConvertTo-Json -Depth 5 -Compress
             return self._get_network_info_from_ipconfig()
 
         data = json.loads(output[json_start:])
+        if data is None:
+            return []
         if isinstance(data, dict):
             data = [data]
 
@@ -263,6 +287,54 @@ $items | ConvertTo-Json -Depth 5 -Compress
 
         self.output("静态 IPv4 配置已应用\n", "success")
 
+    def set_dns_servers(self, name: str, dns_servers: list[str]) -> None:
+        adapter_name = name.strip()
+        if not adapter_name:
+            raise ValueError("请选择网卡")
+
+        servers = [validate_ip(server) for server in dns_servers if str(server).strip()]
+        if not servers:
+            raise ValueError("请输入至少一个 DNS 服务器")
+
+        self._run_netsh(
+            [
+                "interface",
+                "ip",
+                "set",
+                "dnsservers",
+                f"name={adapter_name}",
+                "source=static",
+                f"address={servers[0]}",
+                "index=1",
+            ]
+        )
+        for index, server in enumerate(servers[1:], start=2):
+            self._run_netsh(["interface", "ip", "add", "dnsservers", f"name={adapter_name}", f"address={server}", f"index={index}"])
+        self.output(f"已设置 DNS: {adapter_name} -> {', '.join(servers)}\n", "success")
+
+    def flush_dns_cache(self) -> None:
+        result = run_hidden(["ipconfig", "/flushdns"], timeout=10)
+        if result.returncode != 0:
+            raise RuntimeError(result.stdout.strip() or "刷新 DNS 缓存失败")
+        self.output("已刷新 DNS 缓存\n", "success")
+
+    def set_adapter_enabled(self, name: str, enabled: bool) -> None:
+        adapter_name = name.strip()
+        if not adapter_name:
+            raise ValueError("请选择网卡")
+
+        action = "启用" if enabled else "禁用"
+        self.output(f"准备{action}网卡: {adapter_name}\n", "warning")
+        command = "Enable-NetAdapter" if enabled else "Disable-NetAdapter"
+        script = f"""
+$ErrorActionPreference = "Stop"
+{command} -Name {self._ps_quote(adapter_name)} -Confirm:$false
+"""
+        result = run_hidden(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script], timeout=20)
+        if result.returncode != 0:
+            raise RuntimeError(result.stdout.strip() or f"{action}网卡失败，请确认已用管理员权限运行")
+        self.output(f"网卡已{action}: {adapter_name}\n", "success")
+
     def load_profiles(self) -> dict:
         if not os.path.exists(self.profiles_file):
             return {}
@@ -301,3 +373,6 @@ $items | ConvertTo-Json -Depth 5 -Compress
         if result.returncode != 0:
             message = (result.stdout + result.stderr).strip()
             raise RuntimeError(message or "netsh 命令执行失败，请确认已用管理员权限运行")
+
+    def _ps_quote(self, value: str) -> str:
+        return "'" + value.replace("'", "''") + "'"

@@ -3,13 +3,14 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 from core.Function.loop_fun import ALL_ADAPTERS, LoopDetector
-from core.ui.components import Console, Page, action_bar, button, combo, field
+from core.ui.components import Page, action_bar, button, combo, field
 
 
 class LoopTab(Page):
-    def __init__(self, parent):
+    def __init__(self, parent, console):
         super().__init__(parent, "环网检测", "基于本机证据判断疑似二层环路、广播风暴和网关抖动风险。")
-        self.body.rowconfigure(3, weight=1)
+        self.console = console
+        self.body.rowconfigure(2, weight=1)
 
         status = self.section("实时状态", 0, columns=6)
         self.state = field(status, "状态", 1, 0, "等待", 10)
@@ -78,12 +79,6 @@ class LoopTab(Page):
         result_scroll = ttk.Scrollbar(results, orient="vertical", command=self.results_tree.yview)
         result_scroll.grid(row=1, column=1, sticky="ns", pady=(0, 18))
         self.results_tree.configure(yscrollcommand=result_scroll.set)
-
-        output = self.section("诊断控制台", 3, columns=1)
-        output.rowconfigure(1, weight=1)
-        output.columnconfigure(0, weight=1)
-        self.console = Console(output, height=12)
-        self.console.grid(row=1, column=0, sticky="nsew", padx=18, pady=(0, 18))
 
         self.detector = LoopDetector(self.write, self.on_task_done, self.update_status, self.add_result)
         self.after(350, self.load_adapters)

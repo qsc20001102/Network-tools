@@ -2,8 +2,8 @@ import concurrent.futures
 import csv
 import ipaddress
 import json
+import unicodedata
 import re
-import socket
 import threading
 import time
 from dataclasses import asdict, dataclass, field
@@ -75,7 +75,6 @@ class DeviceDiscoveryOptions:
 class DeviceInfo:
     ip: str
     mac: str
-    hostname: str
     vendor: str
     adapter: str
     interface_index: str
@@ -112,6 +111,12 @@ class DeviceDiscovery:
         adapters = self._active_adapters(self.network.get_network_info())
         return [ALL_ADAPTERS] + [adapter["name"] for adapter in adapters]
 
+    def get_adapter_choices_and_default_range(self) -> tuple[list[str], str, str]:
+        adapters = self._active_adapters(self.network.get_network_info())
+        choices = [ALL_ADAPTERS] + [adapter["name"] for adapter in adapters]
+        default_adapter = preferred_discovery_adapter(adapters)
+        return choices, adapter_to_safe_range(default_adapter) if default_adapter else "", default_adapter.get("name", "") if default_adapter else ""
+
     def default_scan_range(self, adapter_name: str = ALL_ADAPTERS) -> str:
         adapters = self._select_adapters(adapter_name)
         if not adapters:
@@ -136,7 +141,7 @@ class DeviceDiscovery:
         self.last_summary = ""
         self.output(
             f"开始局域网设备发现: {adapter_name or ALL_ADAPTERS}，"
-            f"目标 {len(targets)} 个，并发 {discovery_options.workers}，超时 {discovery_options.timeout_ms}ms\n",
+            f"目标 {len(targets)} 个，并发 {min(discovery_options.workers, 24, max(1, len(targets)))}，超时 {discovery_options.timeout_ms}ms\n",
             "muted",
         )
         self.status(self._status("扫描中", adapter_name or ALL_ADAPTERS, describe_targets(targets), len(targets), 0, 0, 0))
@@ -196,13 +201,14 @@ class DeviceDiscovery:
     def scan_targets(self, targets: list[str], options: DeviceDiscoveryOptions, started: float) -> dict[str, dict]:
         results = {}
         completed = 0
+        workers = min(options.workers, 24, max(1, len(targets)))
 
         def task(ip: str) -> dict:
             if self.stop_event.is_set():
                 return {"ip": ip, "ok": False, "rtt": 0.0}
             return ping_once(ip, options.timeout_ms)
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=options.workers) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
             futures = {executor.submit(task, ip): ip for ip in targets}
             for future in concurrent.futures.as_completed(futures):
                 completed += 1
@@ -241,7 +247,6 @@ class DeviceDiscovery:
             devices[local_ip] = DeviceInfo(
                 ip=local_ip,
                 mac=normalize_mac(adapter.get("mac", "")),
-                hostname=resolve_hostname(local_ip),
                 vendor=vendor_name(adapter.get("mac", "")),
                 adapter=adapter.get("name", ""),
                 interface_index=str(adapter.get("interface_index", "")),
@@ -270,7 +275,6 @@ class DeviceDiscovery:
             devices[ip] = DeviceInfo(
                 ip=ip,
                 mac=mac,
-                hostname=resolve_hostname(ip),
                 vendor=vendor_name(mac),
                 adapter=adapter.get("name", ""),
                 interface_index=str(adapter.get("interface_index", "")),
@@ -285,20 +289,15 @@ class DeviceDiscovery:
             adapter = adapter_for_ip(ip, adapters)
             if not adapter:
                 continue
-            # Ping succeeded but no valid ARP MAC was visible; keep it out of
-            # the asset list unless it is a known local/gateway address.
-            if ip not in gateways and ip not in local_ips:
-                continue
             devices[ip] = DeviceInfo(
                 ip=ip,
                 mac="",
-                hostname=resolve_hostname(ip),
                 vendor="未知",
                 adapter=adapter.get("name", ""),
                 interface_index=str(adapter.get("interface_index", "")),
                 latency_ms=ping.get("rtt", 0.0),
                 method="在线",
-                note="网关" if ip in gateways else "本机",
+                note="网关" if ip in gateways else "本机" if ip in local_ips else "未读取到 MAC",
             )
 
         return list(devices.values())
@@ -346,7 +345,7 @@ Get-NetNeighbor -AddressFamily IPv4 | Select-Object ifIndex,IPAddress,LinkLayerA
 
     def build_scan_targets(self, adapters: list[dict], options: DeviceDiscoveryOptions) -> list[str]:
         if options.scan_range:
-            return parse_target_range(options.scan_range, options.max_hosts)
+            return filter_targets_for_adapters(parse_target_range(options.scan_range, options.max_hosts), adapters)
         targets = []
         for adapter in adapters:
             targets.extend(parse_target_range(adapter_to_safe_range(adapter), options.max_hosts))
@@ -361,7 +360,7 @@ Get-NetNeighbor -AddressFamily IPv4 | Select-Object ifIndex,IPAddress,LinkLayerA
     def export_results(self, path: str) -> None:
         if not self.last_results:
             raise RuntimeError("还没有可导出的设备发现结果")
-        fields = ["ip", "mac", "hostname", "vendor", "adapter", "interface_index", "latency_ms", "method", "note", "checked_at"]
+        fields = ["ip", "mac", "vendor", "adapter", "interface_index", "latency_ms", "method", "note", "checked_at"]
         with open(path, "w", newline="", encoding="utf-8-sig") as file:
             writer = csv.DictWriter(file, fieldnames=fields)
             writer.writeheader()
@@ -372,7 +371,7 @@ Get-NetNeighbor -AddressFamily IPv4 | Select-Object ifIndex,IPAddress,LinkLayerA
         if not self.last_results:
             return self.last_summary
         return "\n".join(
-            f"{row.get('ip', '')}\t{row.get('mac', '')}\t{row.get('hostname', '')}\t{row.get('vendor', '')}\t{row.get('method', '')}"
+            f"{row.get('ip', '')}\t{row.get('mac', '')}\t{row.get('vendor', '')}\t{row.get('method', '')}"
             for row in sorted(self.last_results, key=lambda item: ip_sort_key(item.get("ip", "")))
         )
 
@@ -389,7 +388,8 @@ Get-NetNeighbor -AddressFamily IPv4 | Select-Object ifIndex,IPAddress,LinkLayerA
         adapters = self._active_adapters(self.network.get_network_info())
         if not adapter_name or adapter_name == ALL_ADAPTERS:
             return adapters
-        return [adapter for adapter in adapters if adapter.get("name") == adapter_name]
+        selected = normalize_adapter_name(adapter_name)
+        return [adapter for adapter in adapters if normalize_adapter_name(adapter.get("name", "")) == selected]
 
     def _active_adapters(self, adapters: list[dict]) -> list[dict]:
         active = []
@@ -397,7 +397,7 @@ Get-NetNeighbor -AddressFamily IPv4 | Select-Object ifIndex,IPAddress,LinkLayerA
             if not adapter.get("ipv4"):
                 continue
             status = str(adapter.get("status", "")).lower()
-            if "disconnect" in status or "断开" in status:
+            if any(value in status for value in ("disconnect", "disabled", "not present", "断开", "禁用")):
                 continue
             active.append(adapter)
         return active
@@ -419,7 +419,7 @@ Get-NetNeighbor -AddressFamily IPv4 | Select-Object ifIndex,IPAddress,LinkLayerA
 
 def ping_once(ip: str, timeout_ms: int) -> dict:
     try:
-        result = run_hidden(["ping", ip, "-n", "1", "-w", str(timeout_ms)], timeout=max(2, timeout_ms / 1000 + 2))
+        result = run_hidden(["ping", ip, "-n", "1", "-w", str(timeout_ms)], timeout=max(1.2, timeout_ms / 1000 + 0.8))
         output = result.stdout
         if re.search(r"\bTTL=", output, re.IGNORECASE):
             match = re.search(r"(?:time|时间)[=<]?\s*(\d+(?:\.\d+)?)\s*(?:ms|毫秒)", output, re.IGNORECASE)
@@ -480,6 +480,49 @@ def adapter_to_safe_range(adapter: dict) -> str:
         return ".".join(parts[:3]) + ".0/24" if len(parts) == 4 else ""
 
 
+def preferred_discovery_adapter(adapters: list[dict]) -> Optional[dict]:
+    if not adapters:
+        return None
+    for adapter in adapters:
+        if adapter.get("gateway"):
+            return adapter
+    for adapter in adapters:
+        prefix = adapter.get("prefix_length")
+        try:
+            if prefix not in ("", None) and int(prefix) <= 24:
+                return adapter
+        except (TypeError, ValueError):
+            continue
+    return adapters[0]
+
+
+def filter_targets_for_adapters(targets: list[str], adapters: list[dict]) -> list[str]:
+    return [target for target in targets if target_in_adapter_network(target, adapters)]
+
+
+def target_in_adapter_network(target: str, adapters: list[dict]) -> bool:
+    try:
+        address = ipaddress.ip_address(target)
+    except ValueError:
+        return False
+    for adapter in adapters:
+        local_ip = adapter.get("ipv4", "")
+        if not local_ip:
+            continue
+        prefix = adapter.get("prefix_length") or netmask_to_prefix(adapter.get("netmask", "")) or 24
+        try:
+            if address in ipaddress.ip_network(f"{local_ip}/{prefix}", strict=False):
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def normalize_adapter_name(value: str) -> str:
+    normalized = unicodedata.normalize("NFKC", str(value or ""))
+    return re.sub(r"[\s\u200b-\u200d\ufeff]+", " ", normalized).strip().casefold()
+
+
 def netmask_to_prefix(netmask: str) -> Optional[int]:
     if not netmask:
         return None
@@ -497,27 +540,6 @@ def normalize_neighbor(item: dict) -> dict:
         "mac": normalize_mac(item.get("LinkLayerAddress", "")),
         "state": str(item.get("State", "")),
     }
-
-
-def resolve_hostname(ip: str) -> str:
-    try:
-        old_timeout = socket.getdefaulttimeout()
-        socket.setdefaulttimeout(0.8)
-        try:
-            return socket.gethostbyaddr(ip)[0]
-        finally:
-            socket.setdefaulttimeout(old_timeout)
-    except Exception:
-        pass
-    try:
-        result = run_hidden(["nbtstat", "-A", ip], timeout=2)
-        for line in result.stdout.splitlines():
-            match = re.match(r"\s*([^\s<]+)\s+<00>\s+UNIQUE", line, re.IGNORECASE)
-            if match:
-                return match.group(1).strip()
-    except Exception:
-        pass
-    return ""
 
 
 def vendor_name(mac: str) -> str:

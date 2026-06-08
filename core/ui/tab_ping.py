@@ -5,7 +5,7 @@ from tkinter import filedialog, messagebox, ttk
 
 from core.Function.network_fun import NetworkManager
 from core.Function.ping_fun import PingFun
-from core.ui.components import Console, Page, action_bar, button, combo, field
+from core.ui.components import Page, action_bar, button, combo, field
 
 
 DEFAULT_SOURCE = "默认路由"
@@ -13,9 +13,10 @@ IP_PATTERN = re.compile(r"(?<!\d)(?:\d{1,3}\.){3}\d{1,3}(?!\d)")
 
 
 class PingTab(Page):
-    def __init__(self, parent):
+    def __init__(self, parent, console):
         super().__init__(parent, "Ping 探测", "单点 Ping、批量探活、参数化诊断与结果导出。")
-        self.body.rowconfigure(2, weight=1)
+        self.console = console
+        self.body.rowconfigure(1, weight=1)
 
         status = self.section("实时状态", 0, columns=7)
         self.state = field(status, "状态", 1, 0, "等待", 12)
@@ -37,12 +38,6 @@ class PingTab(Page):
         self.tabs.add(self.batch_tab, text="批量探活")
         self.build_single_tab()
         self.build_batch_tab()
-
-        output = self.section("输出控制台", 2, columns=1)
-        output.rowconfigure(1, weight=1)
-        output.columnconfigure(0, weight=1)
-        self.console = Console(output, height=16)
-        self.console.grid(row=1, column=0, sticky="nsew", padx=18, pady=(0, 18))
 
         self.ping_fun = PingFun(self.write, self.on_task_done, self.update_status)
         self.source_loader = NetworkManager(lambda _text, _tag=None: None)

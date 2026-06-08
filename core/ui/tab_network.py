@@ -2,13 +2,14 @@ import threading
 from tkinter import messagebox
 
 from core.Function.network_fun import NetworkManager
-from core.ui.components import Console, Page, action_bar, button, combo, field, set_entry_state
+from core.ui.components import Page, action_bar, button, combo, field, set_entry_state
 
 
 class NetworkTab(Page):
-    def __init__(self, parent):
+    def __init__(self, parent, console):
         super().__init__(parent, "网卡配置", "查看本机网卡信息，切换 DHCP，或写入静态 IPv4 / DNS 配置。")
-        self.body.rowconfigure(4, weight=1)
+        self.console = console
+        self.body.rowconfigure(3, weight=1)
         self.adapters = []
         self.profiles = {}
 
@@ -23,6 +24,9 @@ class NetworkTab(Page):
         identity = self.section("网卡信息", 1, columns=4)
         self.description = field(identity, "设备描述", 1, 0, "", 46, colspan=2)
         self.mac = field(identity, "MAC 地址", 1, 2, "", 24)
+        adapter_actions = action_bar(identity, 2, 4)
+        self.enable_adapter_btn = button(adapter_actions, "启用网卡", self.enable_adapter, "Primary.TButton")
+        self.disable_adapter_btn = button(adapter_actions, "禁用网卡", self.disable_adapter, "Danger.TButton")
         for item in (self.description, self.mac):
             item["entry"].configure(state="disabled")
 
@@ -46,12 +50,6 @@ class NetworkTab(Page):
         self.apply_profile_btn = button(profile_actions, "套用模板到表单", self.apply_profile_to_form, "Secondary.TButton")
         self.delete_profile_btn = button(profile_actions, "删除模板", self.delete_profile, "Danger.TButton")
 
-        output = self.section("输出控制台", 4, columns=1)
-        output.rowconfigure(1, weight=1)
-        output.columnconfigure(0, weight=1)
-        self.console = Console(output, height=12)
-        self.console.grid(row=1, column=0, sticky="nsew", padx=18, pady=(0, 18))
-
         self.netmgr = NetworkManager(self.write)
         self.load_profiles()
         self.after(250, self.refresh_adapters)
@@ -62,6 +60,8 @@ class NetworkTab(Page):
     def refresh_adapters(self, clear=True):
         self.refresh_btn.configure(state="disabled")
         self.reload_btn.configure(state="disabled")
+        self.enable_adapter_btn.configure(state="disabled")
+        self.disable_adapter_btn.configure(state="disabled")
         if clear:
             self.console.clear()
         self.write("正在读取本机网卡信息...\n", "muted")
@@ -86,6 +86,7 @@ class NetworkTab(Page):
             self.write(f"读取完成，共发现 {len(names)} 个网卡\n", "success")
         else:
             self.write("未发现可用网卡\n", "warning")
+            self.update_adapter_action_state()
         self.refresh_btn.configure(state="normal")
         self.reload_btn.configure(state="normal")
 
@@ -93,6 +94,7 @@ class NetworkTab(Page):
         self.write(f"读取网卡失败: {exc}\n", "error")
         self.refresh_btn.configure(state="normal")
         self.reload_btn.configure(state="normal")
+        self.update_adapter_action_state()
         messagebox.showerror("读取网卡失败", str(exc))
 
     def load_selected_adapter(self):
@@ -118,6 +120,7 @@ class NetworkTab(Page):
         self.description["entry"].configure(state="disabled")
         self.mac["entry"].configure(state="disabled")
         self.update_entry_state()
+        self.update_adapter_action_state(adapter)
         self.write_current_adapter(adapter)
 
     def current_adapter(self):
@@ -131,6 +134,59 @@ class NetworkTab(Page):
         static = self.dhcp["var"].get() == "静态手动配置"
         for item in (self.ipv4, self.netmask, self.gateway, self.dns1, self.dns2):
             set_entry_state(item, static)
+
+    def update_adapter_action_state(self, adapter=None):
+        adapter = adapter or self.current_adapter()
+        if not adapter:
+            self.enable_adapter_btn.configure(state="disabled")
+            self.disable_adapter_btn.configure(state="disabled")
+            return
+
+        status = str(adapter.get("status", "")).lower()
+        disabled = "disabled" in status or "禁用" in status
+        self.enable_adapter_btn.configure(state="normal" if disabled else "disabled")
+        self.disable_adapter_btn.configure(state="disabled" if disabled else "normal")
+
+    def enable_adapter(self):
+        self.set_adapter_enabled(True)
+
+    def disable_adapter(self):
+        adapter = self.current_adapter()
+        if not adapter:
+            messagebox.showwarning("无法禁用网卡", "请先选择网卡")
+            return
+        name = adapter.get("name", "")
+        if not messagebox.askyesno("确认禁用网卡", f"确定禁用网卡“{name}”吗？\n\n这可能会中断当前网络连接。"):
+            return
+        self.set_adapter_enabled(False)
+
+    def set_adapter_enabled(self, enabled: bool):
+        adapter = self.current_adapter()
+        if not adapter:
+            messagebox.showwarning("无法操作网卡", "请先选择网卡")
+            return
+
+        self.enable_adapter_btn.configure(state="disabled")
+        self.disable_adapter_btn.configure(state="disabled")
+        action = "启用" if enabled else "禁用"
+
+        def worker():
+            try:
+                self.netmgr.set_adapter_enabled(adapter.get("name", ""), enabled)
+                self.after(0, lambda: self.on_adapter_action_success(action))
+            except Exception as exc:
+                self.after(0, lambda: self.on_adapter_action_failed(action, exc))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def on_adapter_action_success(self, action: str):
+        self.write(f"网卡{action}完成，正在刷新网卡信息...\n", "success")
+        self.refresh_adapters(clear=False)
+
+    def on_adapter_action_failed(self, action: str, exc):
+        self.write(f"网卡{action}失败: {exc}\n", "error")
+        self.update_adapter_action_state()
+        messagebox.showerror(f"网卡{action}失败", f"{exc}\n\n请确认程序已用管理员权限运行。")
 
     def write_current_adapter(self, adapter):
         self.write("\n当前网卡:\n", "muted")

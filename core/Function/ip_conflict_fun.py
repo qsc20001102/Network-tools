@@ -487,7 +487,7 @@ Get-NetNeighbor -AddressFamily IPv4 | Select-Object ifIndex,IPAddress,LinkLayerA
             if not adapter.get("ipv4"):
                 continue
             status = str(adapter.get("status", "")).lower()
-            if "disconnect" in status or "断开" in status:
+            if any(value in status for value in ("disconnect", "disabled", "not present", "断开", "禁用")):
                 continue
             active.append(adapter)
         return active

@@ -68,7 +68,7 @@ class DnsDiagnostic:
         self.done = done or (lambda: None)
         self.status = status or (lambda _stats: None)
         self.result = result or (lambda _row: None)
-        self.network = NetworkManager(lambda _text, _tag=None: None)
+        self.network = NetworkManager(output)
         self.stop_event = threading.Event()
         self.worker = None
         self.last_results: list[dict] = []
@@ -76,13 +76,34 @@ class DnsDiagnostic:
         self.local_dns_servers: set[str] = set()
 
     def get_adapter_choices(self) -> list[str]:
-        adapters = self._active_adapters(self.network.get_network_info())
+        adapters = self.network.get_network_info()
         return [ALL_ADAPTERS] + [adapter["name"] for adapter in adapters]
 
+    def get_adapter_choices_and_default_dns(self) -> tuple[list[str], str]:
+        adapters = self.network.get_network_info()
+        choices = [ALL_ADAPTERS] + [adapter["name"] for adapter in adapters]
+        servers = collect_adapter_dns(self._active_adapters(adapters))
+        default_dns = ",".join(list(dict.fromkeys(servers + PUBLIC_DNS_SERVERS)))
+        return choices, default_dns
+
     def default_dns_servers(self, adapter_name: str = ALL_ADAPTERS) -> str:
-        adapters = self._select_adapters(adapter_name)
+        adapters = self._select_dns_source_adapters(adapter_name)
         servers = collect_adapter_dns(adapters)
         return ",".join(list(dict.fromkeys(servers + PUBLIC_DNS_SERVERS)))
+
+    def repair_abnormal_dns(self, adapter_name: str = ALL_ADAPTERS) -> dict:
+        if self.is_running():
+            raise RuntimeError("DNS 诊断正在运行，请先停止当前任务")
+
+        adapters = self._select_repair_adapters(adapter_name)
+        if not adapters:
+            raise ValueError("没有找到可修复的活动网卡")
+
+        servers = PUBLIC_DNS_SERVERS[:2]
+        for adapter in adapters:
+            self.network.set_dns_servers(adapter["name"], servers)
+        self.network.flush_dns_cache()
+        return {"adapters": [adapter["name"] for adapter in adapters], "servers": servers}
 
     def start_diagnosis(self, adapter_name: str = ALL_ADAPTERS, options: Optional[dict] = None) -> None:
         if self.is_running():
@@ -302,13 +323,25 @@ class DnsDiagnostic:
             return adapters
         return [adapter for adapter in adapters if adapter.get("name") == adapter_name]
 
+    def _select_dns_source_adapters(self, adapter_name: str) -> list[dict]:
+        adapters = self.network.get_network_info()
+        if not adapter_name or adapter_name == ALL_ADAPTERS:
+            return self._active_adapters(adapters)
+        return [adapter for adapter in adapters if adapter.get("name") == adapter_name]
+
+    def _select_repair_adapters(self, adapter_name: str) -> list[dict]:
+        adapters = self._select_adapters(adapter_name)
+        if adapter_name and adapter_name != ALL_ADAPTERS:
+            return adapters
+        return [adapter for adapter in adapters if adapter.get("gateway") or adapter.get("dns1") or adapter.get("dns2")]
+
     def _active_adapters(self, adapters: list[dict]) -> list[dict]:
         active = []
         for adapter in adapters:
             if not adapter.get("ipv4"):
                 continue
             status = str(adapter.get("status", "")).lower()
-            if "disconnect" in status or "断开" in status:
+            if any(value in status for value in ("disconnect", "disabled", "not present", "断开", "禁用")):
                 continue
             active.append(adapter)
         return active

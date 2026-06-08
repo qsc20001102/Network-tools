@@ -13,7 +13,7 @@ def get_base_dir() -> str:
 
 def main() -> None:
     root = tk.Tk()
-    root.minsize(960, 600)
+    root.minsize(1200, 640)
     MainUI(root, base_dir=get_base_dir())
     root.mainloop()
 
