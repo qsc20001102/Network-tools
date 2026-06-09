@@ -12,13 +12,13 @@ class DnsTab(Page):
         self.console = console
         self.body.rowconfigure(2, weight=1)
 
-        status = self.section("实时状态", 0, columns=6)
+        status = self.section("实时状态", 0, columns=7)
         self.state = field(status, "状态", 1, 0, "等待", 10)
-        self.current_dns = field(status, "当前 DNS", 1, 1, "-", 24, colspan=2)
+        self.current_dns = field(status, "当前 DNS", 1, 1, "-", 18, colspan=2)
         self.target_total = field(status, "目标数", 1, 3, "0", 8)
         self.progress = field(status, "进度", 1, 4, "0/0", 10)
         self.abnormal = field(status, "异常数", 1, 5, "0", 8)
-        self.elapsed = field(status, "耗时", 2, 0, "0.0s", 10)
+        self.elapsed = field(status, "耗时", 1, 6, "0.0s", 10)
         for item in (self.state, self.current_dns, self.target_total, self.progress, self.abnormal, self.elapsed):
             item["entry"].configure(state="disabled")
 
@@ -35,8 +35,9 @@ class DnsTab(Page):
         self.refresh_btn = button(actions, "刷新网卡", self.load_adapters, "Secondary.TButton")
         self.auto_dns_btn = button(actions, "自动 DNS", self.fill_default_dns, "Secondary.TButton")
         self.repair_btn = button(actions, "修复异常", self.repair_dns, "Secondary.TButton")
-        self.copy_btn = button(actions, "复制摘要", self.copy_summary, "Secondary.TButton")
-        self.export_btn = button(actions, "导出 CSV", self.export_results, "Secondary.TButton")
+        secondary_actions = action_bar(params, 4, 6)
+        self.copy_btn = button(secondary_actions, "复制摘要", self.copy_summary, "Secondary.TButton")
+        self.export_btn = button(secondary_actions, "导出 CSV", self.export_results, "Secondary.TButton")
 
         results = self.section("诊断结果", 2, columns=1)
         results.rowconfigure(1, weight=1)
@@ -57,26 +58,29 @@ class DnsTab(Page):
             "verdict": "错误 / 判断",
         }
         widths = {
-            "domain": 130,
-            "type": 56,
-            "server": 116,
-            "status": 64,
-            "elapsed": 76,
-            "values": 220,
-            "verdict": 260,
+            "domain": 135,
+            "type": 55,
+            "server": 115,
+            "status": 65,
+            "elapsed": 78,
+            "values": 250,
+            "verdict": 130,
         }
         for column, title in headings.items():
             self.results_tree.heading(column, text=title)
-            self.results_tree.column(column, width=widths[column], anchor="w")
+            self.results_tree.column(column, width=widths[column], minwidth=widths[column], anchor="w", stretch=False)
         self.results_tree.tag_configure("正常", foreground="#15803d")
         self.results_tree.tag_configure("无记录", foreground="#b7791f")
         self.results_tree.tag_configure("失败", foreground="#dc2626")
         self.results_tree.grid(row=1, column=0, sticky="nsew", padx=18, pady=(0, 18))
-        result_scroll = ttk.Scrollbar(results, orient="vertical", command=self.results_tree.yview)
-        result_scroll.grid(row=1, column=1, sticky="ns", pady=(0, 18))
-        x_scroll = ttk.Scrollbar(results, orient="horizontal", command=self.results_tree.xview)
-        x_scroll.grid(row=2, column=0, sticky="ew", padx=18, pady=(0, 18))
-        self.results_tree.configure(yscrollcommand=result_scroll.set, xscrollcommand=x_scroll.set)
+        result_scroll = ttk.Scrollbar(
+            results,
+            orient="vertical",
+            command=self.results_tree.yview,
+            style="Modern.Vertical.TScrollbar",
+        )
+        result_scroll.grid(row=1, column=1, sticky="ns", pady=(0, 18), padx=(0, 18))
+        self.results_tree.configure(yscrollcommand=result_scroll.set)
 
         self.diagnostic = DnsDiagnostic(self.write, self.on_task_done, self.update_status, self.add_result)
         self.after(350, self.load_adapters)

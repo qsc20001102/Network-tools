@@ -15,7 +15,7 @@ class LoopTab(Page):
         status = self.section("实时状态", 0, columns=6)
         self.state = field(status, "状态", 1, 0, "等待", 10)
         self.adapter_total = field(status, "网卡数", 1, 1, "0", 8)
-        self.current_adapter = field(status, "当前网卡", 1, 2, "-", 18)
+        self.current_adapter = field(status, "当前网卡", 1, 2, "-", 24)
         self.risk_level = field(status, "风险等级", 1, 3, "正常", 10)
         self.max_score = field(status, "最高分", 1, 4, "0", 8)
         self.elapsed = field(status, "耗时", 1, 5, "0.0s", 10)
@@ -23,10 +23,10 @@ class LoopTab(Page):
             item["entry"].configure(state="disabled")
 
         params = self.section("检测参数", 1, columns=5)
-        self.adapter = combo(params, "检测网卡", 1, 0, [ALL_ADAPTERS], ALL_ADAPTERS, 24)
-        self.duration = field(params, "检测时长 s", 1, 1, "15", 10)
-        self.interval = field(params, "采样间隔 s", 1, 2, "1", 10)
-        self.ping_timeout = field(params, "网关 Ping 超时 ms", 1, 3, "800", 12)
+        self.adapter = combo(params, "检测网卡", 1, 0, [ALL_ADAPTERS], ALL_ADAPTERS, 34, colspan=2)
+        self.duration = field(params, "检测时长 s", 1, 2, "15", 10)
+        self.interval = field(params, "采样间隔 s", 1, 3, "1", 10)
+        self.ping_timeout = field(params, "网关 Ping 超时 ms", 1, 4, "800", 12)
         actions = action_bar(params, 2, 5)
         self.start_btn = button(actions, "开始检测", self.start_detection, "Primary.TButton")
         self.stop_btn = button(actions, "停止", self.stop_detection, "Danger.TButton")
@@ -57,17 +57,17 @@ class LoopTab(Page):
             "verdict": "判断",
         }
         widths = {
-            "adapter": 140,
-            "ipv4": 120,
-            "gateway": 120,
-            "non_unicast": 90,
-            "ratio": 90,
-            "loss": 80,
-            "jitter": 80,
-            "arp": 80,
-            "score": 60,
-            "level": 80,
-            "verdict": 360,
+            "adapter": 110,
+            "ipv4": 96,
+            "gateway": 96,
+            "non_unicast": 72,
+            "ratio": 78,
+            "loss": 70,
+            "jitter": 72,
+            "arp": 58,
+            "score": 50,
+            "level": 62,
+            "verdict": 150,
         }
         for column, title in headings.items():
             self.results_tree.heading(column, text=title)
@@ -78,7 +78,9 @@ class LoopTab(Page):
         self.results_tree.grid(row=1, column=0, sticky="nsew", padx=18, pady=(0, 18))
         result_scroll = ttk.Scrollbar(results, orient="vertical", command=self.results_tree.yview)
         result_scroll.grid(row=1, column=1, sticky="ns", pady=(0, 18))
-        self.results_tree.configure(yscrollcommand=result_scroll.set)
+        x_scroll = ttk.Scrollbar(results, orient="horizontal", command=self.results_tree.xview)
+        x_scroll.grid(row=2, column=0, sticky="ew", padx=18, pady=(0, 18))
+        self.results_tree.configure(yscrollcommand=result_scroll.set, xscrollcommand=x_scroll.set)
 
         self.detector = LoopDetector(self.write, self.on_task_done, self.update_status, self.add_result)
         self.after(350, self.load_adapters)

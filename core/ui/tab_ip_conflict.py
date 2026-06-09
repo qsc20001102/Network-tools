@@ -15,7 +15,7 @@ class IpConflictTab(Page):
         status = self.section("实时状态", 0, columns=6)
         self.state = field(status, "状态", 1, 0, "等待", 10)
         self.adapter_total = field(status, "网卡数", 1, 1, "0", 8)
-        self.current = field(status, "当前对象", 1, 2, "-", 18)
+        self.current = field(status, "当前对象", 1, 2, "-", 24)
         self.max_risk = field(status, "最高风险", 1, 3, "正常", 10)
         self.progress = field(status, "进度", 1, 4, "0/0", 10)
         self.elapsed = field(status, "耗时", 1, 5, "0.0s", 10)
@@ -25,7 +25,7 @@ class IpConflictTab(Page):
         params = self.section("检测参数", 1, columns=6)
         self.adapter = combo(params, "检测网卡", 1, 0, [ALL_ADAPTERS], ALL_ADAPTERS, 22)
         self.mode = combo(params, "检测模式", 1, 1, [MODE_BOTH, MODE_LOCAL, MODE_SUBNET], MODE_BOTH, 14)
-        self.scan_range = field(params, "扫描范围", 1, 2, "", 30, colspan=2)
+        self.scan_range = field(params, "扫描范围", 1, 2, "", 42, colspan=2)
         self.workers = field(params, "并发数", 1, 4, "64", 10)
         self.timeout = field(params, "超时 ms", 1, 5, "500", 10)
         self.max_hosts = field(params, "最大地址数", 2, 0, "254", 10)
@@ -56,13 +56,13 @@ class IpConflictTab(Page):
             "verdict": "判断",
         }
         widths = {
-            "adapter": 130,
-            "ip": 150,
-            "mac": 150,
-            "conflict": 180,
-            "type": 110,
-            "level": 90,
-            "verdict": 420,
+            "adapter": 120,
+            "ip": 110,
+            "mac": 135,
+            "conflict": 145,
+            "type": 90,
+            "level": 70,
+            "verdict": 200,
         }
         for column, title in headings.items():
             self.results_tree.heading(column, text=title)
@@ -73,7 +73,9 @@ class IpConflictTab(Page):
         self.results_tree.grid(row=1, column=0, sticky="nsew", padx=18, pady=(0, 18))
         result_scroll = ttk.Scrollbar(results, orient="vertical", command=self.results_tree.yview)
         result_scroll.grid(row=1, column=1, sticky="ns", pady=(0, 18))
-        self.results_tree.configure(yscrollcommand=result_scroll.set)
+        x_scroll = ttk.Scrollbar(results, orient="horizontal", command=self.results_tree.xview)
+        x_scroll.grid(row=2, column=0, sticky="ew", padx=18, pady=(0, 18))
+        self.results_tree.configure(yscrollcommand=result_scroll.set, xscrollcommand=x_scroll.set)
 
         self.detector = IpConflictDetector(self.write, self.on_task_done, self.update_status, self.add_result)
         self.after(350, self.load_adapters)

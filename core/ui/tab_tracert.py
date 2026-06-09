@@ -31,16 +31,16 @@ class TracertTab(Page):
             item["entry"].configure(state="disabled")
 
         params = self.section("追踪参数", 1, columns=7)
-        self.target = field(params, "目标 IP / 域名", 1, 0, "8.8.8.8", 26)
-        self.address_family = combo(params, "地址族", 1, 1, ["自动", "IPv4", "IPv6"], "自动", 10)
-        self.mode = combo(params, "模式", 1, 2, ["单次", "指定次数", "持续"], "单次", 12)
-        self.repeat_count = field(params, "次数", 1, 3, "3", 8)
-        self.interval_ms = field(params, "间隔 ms", 1, 4, "1000", 10)
-        self.max_hops = field(params, "最大跳数", 1, 5, "20", 10)
-        self.timeout_ms = field(params, "单跳超时 ms", 1, 6, "800", 12)
-        self.high_latency_ms = field(params, "高延迟阈值 ms", 2, 0, "100", 12)
+        self.target = field(params, "目标 IP / 域名", 1, 0, "8.8.8.8", 36, colspan=2)
+        self.address_family = combo(params, "地址族", 1, 2, ["自动", "IPv4", "IPv6"], "自动", 10)
+        self.mode = combo(params, "模式", 1, 3, ["单次", "指定次数", "持续"], "单次", 12)
+        self.repeat_count = field(params, "次数", 1, 4, "3", 8)
+        self.interval_ms = field(params, "间隔 ms", 1, 5, "1000", 10)
+        self.max_hops = field(params, "最大跳数", 1, 6, "20", 10)
+        self.timeout_ms = field(params, "单跳超时 ms", 2, 0, "800", 12)
+        self.high_latency_ms = field(params, "高延迟阈值 ms", 2, 1, "100", 12)
         self.resolve_names_var = tk.BooleanVar(value=False)
-        self._check(params, "解析主机名", self.resolve_names_var, 2, 1)
+        self._check(params, "解析主机名", self.resolve_names_var, 2, 2)
         actions = action_bar(params, 3, 7)
         self.start_btn = button(actions, "开始追踪", self.start_trace, "Primary.TButton")
         self.stop_btn = button(actions, "停止", self.stop_trace, "Danger.TButton")
@@ -52,7 +52,7 @@ class TracertTab(Page):
         results.columnconfigure(0, weight=1)
         self.results_tree = ttk.Treeview(
             results,
-            columns=("run", "hop", "probe1", "probe2", "probe3", "avg", "jitter", "host", "ip", "status"),
+            columns=("run", "hop", "probe1", "probe2", "probe3", "avg", "jitter", "ip", "status"),
             show="headings",
             height=9,
         )
@@ -64,32 +64,35 @@ class TracertTab(Page):
             "probe3": "RTT 3",
             "avg": "平均",
             "jitter": "波动",
-            "host": "主机名",
             "ip": "IP",
             "status": "判断",
         }
         widths = {
             "run": 60,
             "hop": 60,
-            "probe1": 70,
-            "probe2": 70,
-            "probe3": 70,
-            "avg": 80,
-            "jitter": 80,
-            "host": 200,
-            "ip": 150,
-            "status": 90,
+            "probe1": 78,
+            "probe2": 78,
+            "probe3": 78,
+            "avg": 88,
+            "jitter": 88,
+            "ip": 190,
+            "status": 190,
         }
         for column, title in headings.items():
             self.results_tree.heading(column, text=title)
-            self.results_tree.column(column, width=widths[column], anchor="w")
+            self.results_tree.column(column, width=widths[column], minwidth=widths[column], anchor="w", stretch=False)
         self.results_tree.tag_configure("ok", foreground="#15803d")
         self.results_tree.tag_configure("timeout", foreground="#b7791f")
         self.results_tree.tag_configure("high_latency", foreground="#dc2626")
         self.results_tree.tag_configure("jitter", foreground="#b7791f")
         self.results_tree.grid(row=1, column=0, sticky="nsew", padx=18, pady=(0, 18))
-        result_scroll = ttk.Scrollbar(results, orient="vertical", command=self.results_tree.yview)
-        result_scroll.grid(row=1, column=1, sticky="ns", pady=(0, 18))
+        result_scroll = ttk.Scrollbar(
+            results,
+            orient="vertical",
+            command=self.results_tree.yview,
+            style="Modern.Vertical.TScrollbar",
+        )
+        result_scroll.grid(row=1, column=1, sticky="ns", pady=(0, 18), padx=(0, 18))
         self.results_tree.configure(yscrollcommand=result_scroll.set)
 
         self.tracert_fun = TracertFun(self.write, self.on_task_done, self.update_status, self.add_result)
@@ -207,7 +210,6 @@ class TracertTab(Page):
                     row.get("probe3", ""),
                     avg,
                     jitter,
-                    row.get("host", ""),
                     row.get("ip", ""),
                     row.get("status_text", ""),
                 ),

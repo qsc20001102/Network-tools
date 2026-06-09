@@ -86,14 +86,14 @@ class Page(ttk.Frame):
         self.rowconfigure(1, weight=1)
 
         header = ttk.Frame(self, style="Page.TFrame")
-        header.grid(row=0, column=0, sticky="ew", padx=28, pady=(28, 12))
+        header.grid(row=0, column=0, sticky="ew", padx=32, pady=(28, 12))
         header.columnconfigure(0, weight=1)
 
         ttk.Label(header, text=title, style="Title.TLabel").grid(row=0, column=0, sticky="w")
         ttk.Label(header, text=subtitle, style="PageMuted.TLabel").grid(row=1, column=0, sticky="w", pady=(8, 0))
 
         body_shell = ttk.Frame(self, style="Page.TFrame")
-        body_shell.grid(row=1, column=0, sticky="nsew", padx=28, pady=(0, 22))
+        body_shell.grid(row=1, column=0, sticky="nsew", padx=32, pady=(0, 22))
         body_shell.columnconfigure(0, weight=1)
         body_shell.rowconfigure(0, weight=1)
 
@@ -131,7 +131,7 @@ class Page(ttk.Frame):
             frame.columnconfigure(col, weight=1)
 
         title_bar = ttk.Frame(frame, style="Panel.TFrame")
-        title_bar.grid(row=0, column=0, columnspan=columns, sticky="ew", padx=22, pady=(18, 10))
+        title_bar.grid(row=0, column=0, columnspan=columns, sticky="ew", padx=20, pady=(18, 10))
         ttk.Label(title_bar, text="▣", style="Section.TLabel", foreground=COLORS["primary"]).pack(side="left", padx=(0, 10))
         ttk.Label(title_bar, text=title, style="Section.TLabel").pack(side="left")
         return frame
@@ -161,7 +161,7 @@ class Page(ttk.Frame):
 
 def field(parent, label: str, row: int, column: int, value: str = "", width: int = 24, colspan: int = 1):
     frame = ttk.Frame(parent, style="Panel.TFrame")
-    frame.grid(row=row, column=column, columnspan=colspan, sticky="ew", padx=22, pady=(4, 16))
+    frame.grid(row=row, column=column, columnspan=colspan, sticky="ew", padx=16, pady=(4, 16))
     frame.columnconfigure(0, weight=1)
 
     ttk.Label(frame, text=label, style="Muted.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 7))
@@ -174,7 +174,7 @@ def field(parent, label: str, row: int, column: int, value: str = "", width: int
 def combo(parent, label: str, row: int, column: int, values=None, value: str = "", width: int = 24, colspan: int = 1):
     values = values or []
     frame = ttk.Frame(parent, style="Panel.TFrame")
-    frame.grid(row=row, column=column, columnspan=colspan, sticky="ew", padx=22, pady=(4, 16))
+    frame.grid(row=row, column=column, columnspan=colspan, sticky="ew", padx=16, pady=(4, 16))
     frame.columnconfigure(0, weight=1)
 
     ttk.Label(frame, text=label, style="Muted.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 7))
@@ -186,7 +186,7 @@ def combo(parent, label: str, row: int, column: int, values=None, value: str = "
 
 def action_bar(parent, row: int, columnspan: int = 4):
     frame = ttk.Frame(parent, style="Panel.TFrame")
-    frame.grid(row=row, column=0, columnspan=columnspan, sticky="ew", padx=22, pady=(0, 18))
+    frame.grid(row=row, column=0, columnspan=columnspan, sticky="ew", padx=16, pady=(0, 18))
     return frame
 
 

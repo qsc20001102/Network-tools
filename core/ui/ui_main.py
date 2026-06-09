@@ -7,8 +7,6 @@ from tkinter import ttk
 from core.ui.components import Console
 from core.ui.tab_device_discovery import DeviceDiscoveryTab
 from core.ui.tab_dns import DnsTab
-from core.ui.tab_ip_conflict import IpConflictTab
-from core.ui.tab_loop import LoopTab
 from core.ui.tab_network import NetworkTab
 from core.ui.tab_ping import PingTab
 from core.ui.tab_telnet import TelnetTab
@@ -21,29 +19,29 @@ class MainUI:
         self.root = root
         self.base_dir = base_dir
         self.root.title("NetPilot 网络调试工具")
-        self.root.geometry("1440x820")
-        self.root.minsize(1280, 760)
+        self.root.geometry("1600x820")
+        self.root.minsize(1440, 780)
         apply_theme(root)
+        self._apply_windows_titlebar_color()
+        self.root.after(100, self._apply_windows_titlebar_color)
 
         self.icon_image = build_app_icon()
         self.root.iconphoto(True, self.icon_image)
 
         self.root.columnconfigure(1, weight=1)
-        self.root.rowconfigure(1, weight=1)
+        self.root.rowconfigure(0, weight=1)
 
-        self._build_topbar()
-
-        self.sidebar = tk.Frame(root, width=260, bg=COLORS["sidebar"])
-        self.sidebar.grid(row=1, column=0, rowspan=2, sticky="ns")
+        self.sidebar = tk.Frame(root, width=250, bg=COLORS["sidebar"])
+        self.sidebar.grid(row=0, column=0, rowspan=2, sticky="ns")
         self.sidebar.grid_propagate(False)
 
         self.content = ttk.Frame(root, style="Page.TFrame")
-        self.content.grid(row=1, column=1, sticky="nsew")
+        self.content.grid(row=0, column=1, sticky="nsew")
         self.content.rowconfigure(0, weight=1)
         self.content.columnconfigure(0, weight=1)
 
-        self.console_shell = tk.Frame(root, width=410, bg=COLORS["bg"])
-        self.console_shell.grid(row=1, column=2, sticky="nsew", padx=(0, 16), pady=(16, 0))
+        self.console_shell = tk.Frame(root, width=360, bg=COLORS["bg"])
+        self.console_shell.grid(row=0, column=2, sticky="nsew", padx=(0, 16), pady=(16, 0))
         self.console_shell.grid_propagate(False)
         self.console_shell.rowconfigure(0, weight=1)
         self.console_shell.columnconfigure(0, weight=1)
@@ -69,37 +67,14 @@ class MainUI:
         self._build_pages()
         self.show_page("network")
 
-    def _build_topbar(self) -> None:
-        bar = tk.Frame(self.root, height=44, bg=COLORS["topbar"])
-        bar.grid(row=0, column=0, columnspan=3, sticky="ew")
-        bar.grid_propagate(False)
-
-        icon = tk.Label(
-            bar,
-            text="NP",
-            bg=COLORS["primary"],
-            fg="#ffffff",
-            font=("Microsoft YaHei UI", 9, "bold"),
-            width=3,
-            height=1,
-        )
-        icon.pack(side="left", padx=(24, 12), pady=8)
-        tk.Label(
-            bar,
-            text="NetPilot 网络调试工具",
-            bg=COLORS["topbar"],
-            fg="#ffffff",
-            font=("Microsoft YaHei UI", 11, "bold"),
-        ).pack(side="left")
-
     def _build_sidebar(self) -> None:
         brand = tk.Frame(self.sidebar, bg=COLORS["sidebar"])
-        brand.pack(fill="x", padx=28, pady=(28, 28))
+        brand.pack(fill="x", padx=24, pady=(28, 28))
 
         logo = tk.Label(
             brand,
             text="NP",
-            width=4,
+            width=3,
             height=2,
             bg=COLORS["primary"],
             fg="#ffffff",
@@ -119,8 +94,6 @@ class MainUI:
             ("ping", "⌁", "Ping 探测", "单点与批量探活"),
             ("ports", "⌕", "端口扫描", "TCP 连通性检测"),
             ("trace", "↗", "路由追踪", "跳点路径分析"),
-            ("loop", "◇", "环网检测", "二层环路风险"),
-            ("ip_conflict", "≠", "IP 冲突", "地址占用排查"),
         ]
         for key, icon, title, subtitle in items:
             self.nav_buttons[key] = self._nav_button(key, icon, title, subtitle)
@@ -136,7 +109,7 @@ class MainUI:
 
     def _nav_button(self, key: str, icon: str, title: str, subtitle: str) -> tk.Frame:
         frame = tk.Frame(self.sidebar, bg=COLORS["sidebar"], cursor="hand2")
-        frame.pack(fill="x", padx=16, pady=5)
+        frame.pack(fill="x", padx=14, pady=5)
 
         icon_label = tk.Label(frame, text=icon, width=3, bg=COLORS["sidebar"], fg="#d9e6f7", font=("Microsoft YaHei UI", 18))
         icon_label.pack(side="left", padx=(12, 8), pady=12)
@@ -163,8 +136,6 @@ class MainUI:
             "ping": PingTab(self.content, self.console),
             "ports": TelnetTab(self.content, self.console),
             "trace": TracertTab(self.content, self.console),
-            "loop": LoopTab(self.content, self.console),
-            "ip_conflict": IpConflictTab(self.content, self.console),
             "devices": DeviceDiscoveryTab(self.content, self.console),
         }
         for page in self.pages.values():
@@ -213,7 +184,7 @@ class MainUI:
             highlightthickness=1,
             bd=0,
         )
-        status.grid(row=2, column=1, columnspan=2, sticky="ew")
+        status.grid(row=1, column=1, columnspan=2, sticky="ew")
         status.grid_propagate(False)
         status.columnconfigure(1, weight=1)
 
@@ -246,3 +217,22 @@ class MainUI:
             return bool(ctypes.windll.shell32.IsUserAnAdmin())
         except Exception:
             return False
+
+    def _apply_windows_titlebar_color(self) -> None:
+        try:
+            hwnd = self.root.winfo_id()
+            caption_color = ctypes.c_int(self._colorref(COLORS["topbar"]))
+            text_color = ctypes.c_int(self._colorref("#ffffff"))
+            border_color = ctypes.c_int(self._colorref(COLORS["topbar"]))
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 35, ctypes.byref(caption_color), ctypes.sizeof(caption_color))
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 36, ctypes.byref(text_color), ctypes.sizeof(text_color))
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 34, ctypes.byref(border_color), ctypes.sizeof(border_color))
+        except Exception:
+            pass
+
+    def _colorref(self, color: str) -> int:
+        color = color.lstrip("#")
+        red = int(color[0:2], 16)
+        green = int(color[2:4], 16)
+        blue = int(color[4:6], 16)
+        return red | (green << 8) | (blue << 16)

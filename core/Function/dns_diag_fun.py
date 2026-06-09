@@ -76,13 +76,13 @@ class DnsDiagnostic:
         self.local_dns_servers: set[str] = set()
 
     def get_adapter_choices(self) -> list[str]:
-        adapters = self.network.get_network_info()
+        adapters = self._active_adapters(self.network.get_network_info())
         return [ALL_ADAPTERS] + [adapter["name"] for adapter in adapters]
 
     def get_adapter_choices_and_default_dns(self) -> tuple[list[str], str]:
-        adapters = self.network.get_network_info()
+        adapters = self._active_adapters(self.network.get_network_info())
         choices = [ALL_ADAPTERS] + [adapter["name"] for adapter in adapters]
-        servers = collect_adapter_dns(self._active_adapters(adapters))
+        servers = collect_adapter_dns(adapters)
         default_dns = ",".join(list(dict.fromkeys(servers + PUBLIC_DNS_SERVERS)))
         return choices, default_dns
 
@@ -324,9 +324,9 @@ class DnsDiagnostic:
         return [adapter for adapter in adapters if adapter.get("name") == adapter_name]
 
     def _select_dns_source_adapters(self, adapter_name: str) -> list[dict]:
-        adapters = self.network.get_network_info()
+        adapters = self._active_adapters(self.network.get_network_info())
         if not adapter_name or adapter_name == ALL_ADAPTERS:
-            return self._active_adapters(adapters)
+            return adapters
         return [adapter for adapter in adapters if adapter.get("name") == adapter_name]
 
     def _select_repair_adapters(self, adapter_name: str) -> list[dict]:

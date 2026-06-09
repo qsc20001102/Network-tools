@@ -12,6 +12,7 @@ from typing import Callable, Optional
 from core.Function.common import run_hidden
 from core.Function.loop_fun import normalize_mac
 from core.Function.network_fun import NetworkManager
+from core.Function.oui_lookup import OuiVendorLookup
 
 
 OutputCallback = Callable[[str, Optional[str]], None]
@@ -63,6 +64,9 @@ OUI_VENDOR_MAP = {
 }
 
 
+OUI_LOOKUP = OuiVendorLookup(OUI_VENDOR_MAP)
+
+
 @dataclass
 class DeviceDiscoveryOptions:
     scan_range: str = ""
@@ -106,6 +110,8 @@ class DeviceDiscovery:
         self.worker = None
         self.last_results: list[dict] = []
         self.last_summary = ""
+        OUI_LOOKUP.load(self.output)
+        OUI_LOOKUP.update_if_stale_async(self.output)
 
     def get_adapter_choices(self) -> list[str]:
         adapters = self._active_adapters(self.network.get_network_info())
@@ -543,10 +549,7 @@ def normalize_neighbor(item: dict) -> dict:
 
 
 def vendor_name(mac: str) -> str:
-    normalized = normalize_mac(mac)
-    if len(normalized) < 8:
-        return "未知"
-    return OUI_VENDOR_MAP.get(normalized[:8], "未知")
+    return OUI_LOOKUP.lookup(mac)
 
 
 def build_summary(rows: list[dict], stopped: bool = False) -> str:

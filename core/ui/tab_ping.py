@@ -30,8 +30,10 @@ class PingTab(Page):
             item["entry"].configure(state="disabled")
 
         modes = self.section("探测模式", 1, columns=1)
+        modes.rowconfigure(1, weight=1)
+        modes.columnconfigure(0, weight=1)
         self.tabs = ttk.Notebook(modes)
-        self.tabs.grid(row=1, column=0, sticky="ew", padx=18, pady=(0, 18))
+        self.tabs.grid(row=1, column=0, sticky="nsew", padx=18, pady=(0, 18))
         self.single_tab = ttk.Frame(self.tabs, style="Panel.TFrame")
         self.batch_tab = ttk.Frame(self.tabs, style="Panel.TFrame")
         self.tabs.add(self.single_tab, text="单点探测")
@@ -47,18 +49,18 @@ class PingTab(Page):
         for col in range(6):
             self.single_tab.columnconfigure(col, weight=1)
 
-        self.local_ip = combo(self.single_tab, "本地源 IP", 0, 0, [], "", 22)
-        self.target = field(self.single_tab, "目标 IP / 域名", 0, 1, "127.0.0.1", 28)
-        self.single_mode = combo(self.single_tab, "模式", 0, 2, ["持续", "指定次数"], "持续", 12)
-        self.count = field(self.single_tab, "次数", 0, 3, "4", 8)
-        self.interval = field(self.single_tab, "间隔 ms", 0, 4, "1000", 10)
-        self.timeout = field(self.single_tab, "超时 ms", 0, 5, "1200", 10)
+        self.local_ip = combo(self.single_tab, "本地源 IP", 0, 0, [], "", 28)
+        self.target = field(self.single_tab, "目标 IP / 域名", 0, 1, "127.0.0.1", 36, colspan=2)
+        self.single_mode = combo(self.single_tab, "模式", 0, 3, ["持续", "指定次数"], "持续", 12)
+        self.count = field(self.single_tab, "次数", 0, 4, "4", 8)
+        self.interval = field(self.single_tab, "间隔 ms", 0, 5, "1000", 10)
+        self.timeout = field(self.single_tab, "超时 ms", 1, 0, "1200", 10)
 
-        self.size = field(self.single_tab, "包大小 bytes", 1, 0, "32", 12)
-        self.ttl = field(self.single_tab, "TTL（0=默认）", 1, 1, "0", 12)
+        self.size = field(self.single_tab, "包大小 bytes", 1, 1, "32", 12)
+        self.ttl = field(self.single_tab, "TTL（0=默认）", 1, 2, "0", 12)
         self.df_var = tk.BooleanVar(value=False)
         df_frame = ttk.Frame(self.single_tab, style="Panel.TFrame")
-        df_frame.grid(row=1, column=2, sticky="ew", padx=18, pady=(22, 14))
+        df_frame.grid(row=1, column=3, sticky="ew", padx=18, pady=(22, 14))
         ttk.Checkbutton(df_frame, text="禁止分片", variable=self.df_var).pack(anchor="w")
 
         actions = action_bar(self.single_tab, 2, 6)
@@ -70,16 +72,16 @@ class PingTab(Page):
         for col in range(6):
             self.batch_tab.columnconfigure(col, weight=1)
 
-        self.batch_local_ip = combo(self.batch_tab, "本地源 IP", 0, 0, [], "", 22)
-        self.targets = field(self.batch_tab, "目标范围 / 列表", 0, 1, "192.168.1.0/24", 42, colspan=2)
-        self.batch_timeout = field(self.batch_tab, "超时 ms", 0, 3, "1200", 10)
-        self.batch_size = field(self.batch_tab, "包大小 bytes", 0, 4, "32", 12)
-        self.workers = field(self.batch_tab, "并发数", 0, 5, "64", 10)
+        self.batch_local_ip = combo(self.batch_tab, "本地源 IP", 0, 0, [], "", 28)
+        self.targets = field(self.batch_tab, "目标范围 / 列表", 0, 1, "192.168.1.0/24", 52, colspan=3)
+        self.batch_timeout = field(self.batch_tab, "超时 ms", 0, 4, "1200", 10)
+        self.batch_size = field(self.batch_tab, "包大小 bytes", 0, 5, "32", 12)
+        self.workers = field(self.batch_tab, "并发数", 1, 0, "64", 10)
 
-        self.batch_ttl = field(self.batch_tab, "TTL（0=默认）", 1, 0, "0", 12)
+        self.batch_ttl = field(self.batch_tab, "TTL（0=默认）", 1, 1, "0", 12)
         self.batch_df_var = tk.BooleanVar(value=False)
         df_frame = ttk.Frame(self.batch_tab, style="Panel.TFrame")
-        df_frame.grid(row=1, column=1, sticky="ew", padx=18, pady=(22, 14))
+        df_frame.grid(row=1, column=2, sticky="ew", padx=18, pady=(22, 14))
         ttk.Checkbutton(df_frame, text="禁止分片", variable=self.batch_df_var).pack(anchor="w")
 
         actions = action_bar(self.batch_tab, 2, 6)

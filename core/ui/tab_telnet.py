@@ -33,8 +33,10 @@ class TelnetTab(Page):
             item["entry"].configure(state="disabled")
 
         modes = self.section("扫描模式", 1, columns=1)
+        modes.rowconfigure(1, weight=1)
+        modes.columnconfigure(0, weight=1)
         self.tabs = ttk.Notebook(modes)
-        self.tabs.grid(row=1, column=0, sticky="ew", padx=18, pady=(0, 18))
+        self.tabs.grid(row=1, column=0, sticky="nsew", padx=18, pady=(0, 18))
         self.single_tab = ttk.Frame(self.tabs, style="Panel.TFrame")
         self.scan_tab = ttk.Frame(self.tabs, style="Panel.TFrame")
         self.batch_tab = ttk.Frame(self.tabs, style="Panel.TFrame")
@@ -64,25 +66,30 @@ class TelnetTab(Page):
             "banner": "Banner / 错误",
         }
         widths = {
-            "host": 150,
-            "resolved_ip": 130,
+            "host": 185,
+            "resolved_ip": 145,
             "port": 70,
-            "service": 100,
+            "service": 125,
             "status": 80,
-            "latency": 80,
-            "banner": 320,
+            "latency": 85,
+            "banner": 120,
         }
         for column, title in headings.items():
             self.results_tree.heading(column, text=title)
-            self.results_tree.column(column, width=widths[column], anchor="w")
+            self.results_tree.column(column, width=widths[column], minwidth=widths[column], anchor="w", stretch=False)
         self.results_tree.tag_configure("open", foreground="#15803d")
         self.results_tree.tag_configure("timeout", foreground="#b7791f")
         self.results_tree.tag_configure("unreachable", foreground="#b7791f")
         self.results_tree.tag_configure("dns_error", foreground="#dc2626")
         self.results_tree.tag_configure("error", foreground="#dc2626")
         self.results_tree.grid(row=1, column=0, sticky="nsew", padx=18, pady=(0, 18))
-        result_scroll = ttk.Scrollbar(results, orient="vertical", command=self.results_tree.yview)
-        result_scroll.grid(row=1, column=1, sticky="ns", pady=(0, 18))
+        result_scroll = ttk.Scrollbar(
+            results,
+            orient="vertical",
+            command=self.results_tree.yview,
+            style="Modern.Vertical.TScrollbar",
+        )
+        result_scroll.grid(row=1, column=1, sticky="ns", pady=(0, 18), padx=(0, 18))
         self.results_tree.configure(yscrollcommand=result_scroll.set)
 
         self.scanner = PortScanner(self.write, self.on_task_done, self.update_status, self.add_result)
@@ -91,11 +98,11 @@ class TelnetTab(Page):
         for col in range(5):
             self.single_tab.columnconfigure(col, weight=1)
 
-        self.single_host = field(self.single_tab, "目标 IP / 域名", 0, 0, "127.0.0.1", 26)
-        self.single_port = field(self.single_tab, "目标端口", 0, 1, "443", 12)
-        self.single_timeout = field(self.single_tab, "超时 ms", 0, 2, "1000", 10)
+        self.single_host = field(self.single_tab, "目标 IP / 域名", 0, 0, "127.0.0.1", 36, colspan=2)
+        self.single_port = field(self.single_tab, "目标端口", 0, 2, "443", 12)
+        self.single_timeout = field(self.single_tab, "超时 ms", 0, 3, "1000", 10)
         self.single_banner_var = tk.BooleanVar(value=False)
-        self._check(self.single_tab, "Banner 探测", self.single_banner_var, 0, 3)
+        self._check(self.single_tab, "Banner 探测", self.single_banner_var, 0, 4)
         actions = action_bar(self.single_tab, 1, 5)
         self.single_btn = button(actions, "测试连接", self.test_single, "Primary.TButton")
         self.single_export_btn = button(actions, "导出 CSV", self.export_results, "Secondary.TButton")
@@ -104,15 +111,15 @@ class TelnetTab(Page):
         for col in range(6):
             self.scan_tab.columnconfigure(col, weight=1)
 
-        self.scan_host = field(self.scan_tab, "目标 IP / 域名", 0, 0, "127.0.0.1", 26)
-        self.scan_ports = field(self.scan_tab, "端口列表 / 范围", 0, 1, PORT_PRESETS["常用端口"], 44, colspan=2)
-        self.scan_preset = combo(self.scan_tab, "预设", 0, 3, list(PORT_PRESETS), "常用端口", 16)
-        self.scan_timeout = field(self.scan_tab, "超时 ms", 0, 4, "800", 10)
-        self.scan_workers = field(self.scan_tab, "并发数", 0, 5, "128", 10)
+        self.scan_host = field(self.scan_tab, "目标 IP / 域名", 0, 0, "127.0.0.1", 30)
+        self.scan_ports = field(self.scan_tab, "端口列表 / 范围", 0, 1, PORT_PRESETS["常用端口"], 58, colspan=3)
+        self.scan_preset = combo(self.scan_tab, "预设", 0, 4, list(PORT_PRESETS), "常用端口", 16)
+        self.scan_timeout = field(self.scan_tab, "超时 ms", 0, 5, "800", 10)
+        self.scan_workers = field(self.scan_tab, "并发数", 1, 0, "128", 10)
         self.scan_show_closed_var = tk.BooleanVar(value=False)
         self.scan_banner_var = tk.BooleanVar(value=False)
-        self._check(self.scan_tab, "显示关闭端口", self.scan_show_closed_var, 1, 0)
-        self._check(self.scan_tab, "Banner 探测", self.scan_banner_var, 1, 1)
+        self._check(self.scan_tab, "显示关闭端口", self.scan_show_closed_var, 1, 1)
+        self._check(self.scan_tab, "Banner 探测", self.scan_banner_var, 1, 2)
         self.scan_preset["combobox"].bind("<<ComboboxSelected>>", lambda _event: self.apply_preset(self.scan_preset, self.scan_ports))
 
         actions = action_bar(self.scan_tab, 2, 6)
@@ -125,8 +132,8 @@ class TelnetTab(Page):
         for col in range(6):
             self.batch_tab.columnconfigure(col, weight=1)
 
-        self.batch_hosts = field(self.batch_tab, "目标列表 / CIDR / IP 段", 0, 0, "192.168.1.1-254", 38, colspan=2)
-        self.batch_ports = field(self.batch_tab, "端口列表 / 范围", 0, 2, "22,80,443,3389", 32, colspan=2)
+        self.batch_hosts = field(self.batch_tab, "目标列表 / CIDR / IP 段", 0, 0, "192.168.1.1-254", 46, colspan=2)
+        self.batch_ports = field(self.batch_tab, "端口列表 / 范围", 0, 2, "22,80,443,3389", 42, colspan=2)
         self.batch_preset = combo(self.batch_tab, "预设", 0, 4, list(PORT_PRESETS), "远程管理", 16)
         self.batch_timeout = field(self.batch_tab, "超时 ms", 0, 5, "800", 10)
         self.batch_workers = field(self.batch_tab, "并发数", 1, 0, "128", 10)

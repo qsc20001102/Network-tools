@@ -12,30 +12,30 @@ class DeviceDiscoveryTab(Page):
         self.console = console
         self.body.rowconfigure(2, weight=1)
 
-        status = self.section("实时状态", 0, columns=6)
+        status = self.section("实时状态", 0, columns=7)
         self.state = field(status, "状态", 1, 0, "等待", 10)
         self.current = field(status, "当前网卡", 1, 1, "-", 18)
-        self.scan_scope = field(status, "扫描范围", 1, 2, "-", 20)
-        self.progress = field(status, "进度", 1, 3, "0/0", 10)
-        self.found = field(status, "发现设备", 1, 4, "0", 8)
-        self.elapsed = field(status, "耗时", 1, 5, "0.0s", 10)
+        self.scan_scope = field(status, "扫描范围", 1, 2, "-", 22, colspan=2)
+        self.progress = field(status, "进度", 1, 4, "0/0", 10)
+        self.found = field(status, "发现设备", 1, 5, "0", 8)
+        self.elapsed = field(status, "耗时", 1, 6, "0.0s", 10)
         for item in (self.state, self.current, self.scan_scope, self.progress, self.found, self.elapsed):
             item["entry"].configure(state="disabled")
 
         params = self.section("发现参数", 1, columns=6)
         self.adapter = combo(params, "检测网卡", 1, 0, [ALL_ADAPTERS], ALL_ADAPTERS, 22)
         self.adapter["combobox"].bind("<<ComboboxSelected>>", lambda _event: self.fill_default_range(silent=True))
-        self.scan_range = field(params, "扫描范围", 1, 1, "", 34, colspan=2)
-        self.workers = field(params, "并发数", 1, 3, "24", 10)
-        self.timeout = field(params, "超时 ms", 1, 4, "500", 10)
-        self.max_hosts = field(params, "最大地址数", 1, 5, "254", 10)
-        primary_actions = action_bar(params, 2, 6)
+        self.scan_range = field(params, "扫描范围", 1, 1, "", 42, colspan=3)
+        self.workers = field(params, "并发数", 1, 4, "24", 10)
+        self.timeout = field(params, "超时 ms", 1, 5, "500", 10)
+        self.max_hosts = field(params, "最大地址数", 2, 0, "254", 10)
+        primary_actions = action_bar(params, 3, 6)
         self.start_btn = button(primary_actions, "开始发现", self.start_discovery, "Primary.TButton")
         self.stop_btn = button(primary_actions, "停止", self.stop_discovery, "Danger.TButton")
         self.refresh_btn = button(primary_actions, "刷新网卡", self.load_adapters, "Secondary.TButton")
         self.auto_range_btn = button(primary_actions, "自动范围", self.fill_default_range, "Secondary.TButton")
         self.stop_btn.configure(state="disabled")
-        secondary_actions = action_bar(params, 3, 6)
+        secondary_actions = action_bar(params, 4, 6)
         self.copy_btn = button(secondary_actions, "复制清单", self.copy_inventory, "Secondary.TButton")
         self.export_btn = button(secondary_actions, "导出CSV", self.export_results, "Secondary.TButton")
 
@@ -58,26 +58,29 @@ class DeviceDiscoveryTab(Page):
             "note": "备注",
         }
         widths = {
-            "ip": 112,
-            "mac": 132,
-            "vendor": 120,
-            "adapter": 150,
-            "latency": 72,
+            "ip": 105,
+            "mac": 170,
+            "vendor": 270,
+            "adapter": 80,
+            "latency": 65,
             "method": 80,
-            "note": 140,
+            "note": 100,
         }
         for column, title in headings.items():
             self.results_tree.heading(column, text=title)
-            self.results_tree.column(column, width=widths[column], anchor="w")
+            self.results_tree.column(column, width=widths[column], minwidth=widths[column], anchor="w", stretch=False)
         self.results_tree.tag_configure("在线", foreground="#15803d")
         self.results_tree.tag_configure("ARP 可见", foreground="#b7791f")
         self.results_tree.tag_configure("本机", foreground="#246bfe")
         self.results_tree.grid(row=1, column=0, sticky="nsew", padx=18, pady=(0, 18))
-        result_scroll = ttk.Scrollbar(results, orient="vertical", command=self.results_tree.yview)
-        result_scroll.grid(row=1, column=1, sticky="ns", pady=(0, 18))
-        x_scroll = ttk.Scrollbar(results, orient="horizontal", command=self.results_tree.xview)
-        x_scroll.grid(row=2, column=0, sticky="ew", padx=18, pady=(0, 18))
-        self.results_tree.configure(yscrollcommand=result_scroll.set, xscrollcommand=x_scroll.set)
+        result_scroll = ttk.Scrollbar(
+            results,
+            orient="vertical",
+            command=self.results_tree.yview,
+            style="Modern.Vertical.TScrollbar",
+        )
+        result_scroll.grid(row=1, column=1, sticky="ns", pady=(0, 18), padx=(0, 18))
+        self.results_tree.configure(yscrollcommand=result_scroll.set)
 
         self.discovery = DeviceDiscovery(self.write, self.on_task_done, self.update_status, self.add_result)
         self.after(350, self.load_adapters)

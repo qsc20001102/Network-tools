@@ -11,9 +11,9 @@ if exist "%PYTHON_EXE%" (
         if errorlevel 1 exit /b 1
     )
     set "PYTHONPATH=%PYINSTALLER_PATH%"
-    "%PYTHON_EXE%" -m PyInstaller -F -w main.py -n NetworkTool --icon "%APP_ICON%"
+    "%PYTHON_EXE%" -m PyInstaller -F -w main.py -n NetworkTool --icon "%APP_ICON%" --add-data "%CD%\assets\oui_vendors_seed.json;assets"
 ) else (
-    pyinstaller -F -w main.py -n NetworkTool --icon "%APP_ICON%"
+    pyinstaller -F -w main.py -n NetworkTool --icon "%APP_ICON%" --add-data "%CD%\assets\oui_vendors_seed.json;assets"
 )
 
 endlocal
